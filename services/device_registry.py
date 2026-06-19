@@ -1,10 +1,14 @@
 connected_devices = {}
 
-
-def register_device(imei, ip):
+def register_device(
+    imei,
+    ip,
+    device_id
+):
 
     connected_devices[imei] = {
-        "ip": ip
+        "ip": ip,
+        "device_id": device_id
     }
 
 

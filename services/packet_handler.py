@@ -6,6 +6,11 @@ from parsers.v5_parser import (
 
 from services.device_registry import register_device
 
+from services.tracking_service import (
+    get_device_by_imei,
+    save_raw_packet
+)
+
 
 def process_packet(data, conn, addr):
 
@@ -24,30 +29,79 @@ def process_packet(data, conn, addr):
 
         print("📡 Login Packet")
 
-        login = parse_login_packet(raw)
+        try:
 
-        register_device(
-            login["imei"],
-            addr[0]
-        )
+            login = parse_login_packet(raw)
 
-        print("📱 IMEI:", login["imei"])
-        print("🔢 Serial:", login["serial"])
+            print("DEBUG 1 - Login Parsed")
+
+            device_id = get_device_by_imei(
+                login["imei"]
+            )
+
+            print(
+                f"DEBUG 2 - Device Lookup Result: {device_id}"
+            )
+
+            if not device_id:
+
+                print(
+                    f"❌ Unauthorized Device: {login['imei']}"
+                )
+
+                return
+
+            print("DEBUG 3 - Device Authorized")
+
+            register_device(
+                login["imei"],
+                addr[0],
+                device_id
+            )
+
+            print("DEBUG 4 - Device Registered")
+
+            save_raw_packet(
+                device_id=device_id,
+                protocol_number=protocol,
+                raw_hex=hex_data,
+                parsed=True
+            )
+
+            print("DEBUG 5 - Raw Packet Saved")
+
+            print("📱 IMEI:", login["imei"])
+            print("🆔 Device ID:", device_id)
+            print("🔢 Serial:", login["serial"])
+
+        except Exception as ex:
+
+            print(
+                f"❌ LOGIN ERROR: {ex}"
+            )
 
     elif protocol in ["12", "22"]:
 
         print("📍 LOCATION RECEIVED")
 
-        location = parse_location_packet(raw)
+        try:
 
-        print("Latitude:", location["latitude"])
-        print("Longitude:", location["longitude"])
-        print("Speed:", location["speed"])
-        print("Time:", location["timestamp"])
+            location = parse_location_packet(raw)
 
-        print(
-            f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}"
-        )
+            print("Latitude:", location["latitude"])
+            print("Longitude:", location["longitude"])
+            print("Speed:", location["speed"])
+            print("Time:", location["timestamp"])
+
+            print(
+                f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}"
+            )
+
+        except Exception as ex:
+
+            print(
+                f"❌ LOCATION ERROR: {ex}"
+            )
 
     elif protocol == "13":
 
@@ -61,8 +115,19 @@ def process_packet(data, conn, addr):
 
         print("❓ Unknown Packet")
 
-    ack = build_ack(data)
+    try:
 
-    conn.send(ack)
+        ack = build_ack(data)
 
-    print("📤 ACK sent:", ack.hex())
+        conn.send(ack)
+
+        print(
+            "📤 ACK sent:",
+            ack.hex()
+        )
+
+    except Exception as ex:
+
+        print(
+            f"❌ ACK ERROR: {ex}"
+        )
