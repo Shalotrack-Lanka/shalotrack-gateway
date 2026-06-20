@@ -107,7 +107,7 @@ def process_packet(data, conn, addr):
             )
 
             save_tracking(
-                device_id=device["DeviceId"],
+                device_id=device["device_id"],
                 latitude=location["latitude"],
                 longitude=location["longitude"],
                 speed=location["speed"],
