@@ -95,3 +95,68 @@ def get_device_by_imei(imei):
         return str(result[0])
 
     return None
+
+# Saves GPS tracking data to the GpsTrackings database table
+# Parameters:   
+#   device_id: unique identifier for the device sending the tracking data
+#   latitude: latitude coordinate of the device's location
+#   longitude: longitude coordinate of the device's location
+#   speed: speed of the device at the time of tracking
+#   event_time: timestamp of when the tracking event occurred
+def save_tracking(
+    device_id,
+    latitude,
+    longitude,
+    speed,
+    event_time
+):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO "GpsTrackings"
+        (
+            "DeviceId",
+            "Latitude",
+            "Longitude",
+            "Altitude",
+            "Speed",
+            "Heading",
+            "Satellites",
+            "GpsAccuracy",
+            "EventTime",
+            "CreatedAt"
+        )
+        VALUES
+        (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            NOW()
+        )
+        """,
+        (
+            device_id,
+            latitude,
+            longitude,
+            None,
+            speed,
+            0,
+            0,
+            None,
+            event_time
+        )
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()

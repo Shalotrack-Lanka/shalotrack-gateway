@@ -4,11 +4,16 @@ from parsers.v5_parser import (
     build_ack
 )
 
-from services.device_registry import register_device
+from services.device_registry import (
+    get_device,
+    register_device,
+    getdevice
+)
 
 from services.tracking_service import (
     get_device_by_imei,
-    save_raw_packet
+    save_raw_packet,
+    save_tracking
 )
 
 
@@ -96,6 +101,21 @@ def process_packet(data, conn, addr):
             print(
                 f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}"
             )
+
+            #temporary device ID for testing - replace with actual device lookup in production
+            device = get_device(
+                "355172106043787"
+            )
+
+            save_tracking(
+                device_id=device["DeviceId"],
+                latitude=location["latitude"],
+                longitude=location["longitude"],
+                speed=location["speed"],
+                event_time=location["timestamp"]
+            )
+
+            print(" GPS Tracking Saved")
 
         except Exception as ex:
 
