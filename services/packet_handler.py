@@ -12,7 +12,9 @@ from services.device_registry import (
 from services.tracking_service import (
     get_device_by_imei,
     save_raw_packet,
-    save_tracking
+    save_tracking,
+    get_vehicle_by_device,
+    update_current_location
 )
 
 
@@ -115,6 +117,23 @@ def process_packet(data, conn, addr):
             )
 
             print(" GPS Tracking Saved")
+
+            vehicle_id = get_vehicle_by_device(
+                device["device_id"]
+            )
+
+            if vehicle_id:
+
+                update_current_location(
+                    device_id=device["device_id"],
+                    vehicle_id=vehicle_id,
+                    latitude=location["latitude"],
+                    longitude=location["longitude"],
+                    speed=location["speed"],
+                    event_time=location["timestamp"]
+                )
+            
+            print(" Current Location Updated")
 
         except Exception as ex:
 

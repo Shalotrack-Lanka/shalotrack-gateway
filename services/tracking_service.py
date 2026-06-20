@@ -189,3 +189,68 @@ def get_vehicle_by_device(device_id):
     return None
 
 
+
+def update_current_location(
+    device_id,
+    vehicle_id,
+    latitude,
+    longitude,
+    speed,
+    event_time
+):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO "CurrentLocations"
+        (
+            "DeviceId",
+            "VehicleId",
+            "Latitude",
+            "Longitude",
+            "Speed",
+            "Heading",
+            "IgnitionStatus",
+            "MovementStatus",
+            "LastUpdate"
+        )
+        VALUES
+        (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s
+        )
+        ON CONFLICT ("DeviceId")
+        DO UPDATE SET
+            "VehicleId" = EXCLUDED."VehicleId",
+            "Latitude" = EXCLUDED."Latitude",
+            "Longitude" = EXCLUDED."Longitude",
+            "Speed" = EXCLUDED."Speed",
+            "LastUpdate" = EXCLUDED."LastUpdate",
+            "MovementStatus" = EXCLUDED."MovementStatus"
+        """,
+        (
+            device_id,
+            vehicle_id,
+            latitude,
+            longitude,
+            speed,
+            0,
+            False,
+            speed > 0,
+            event_time
+        )
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
