@@ -6,8 +6,7 @@ from parsers.v5_parser import (
 
 from services.device_registry import (
     get_device,
-    register_device,
-    getdevice
+    register_device
 )
 
 from services.tracking_service import (
