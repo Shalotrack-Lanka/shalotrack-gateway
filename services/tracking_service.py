@@ -160,3 +160,32 @@ def save_tracking(
 
     cursor.close()
     conn.close()
+
+
+def get_vehicle_by_device(device_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT "VehicleId"
+        FROM "DeviceAssignments"
+        WHERE "DeviceId" = %s
+        AND "Status" = 1
+        LIMIT 1
+        """,
+        (device_id,)
+    )
+
+    result = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    if result:
+        return str(result[0])
+
+    return None
+
+
