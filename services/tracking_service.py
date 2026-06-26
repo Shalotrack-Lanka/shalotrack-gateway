@@ -262,12 +262,13 @@ def update_device_status(
     gps_signal,
     ignition_status,
     movement_status,
-    power_status,
-    now=datetime.utcnow()
+    power_status
 ):
 
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    now=datetime.utcnow()
 
     cursor.execute(
         """

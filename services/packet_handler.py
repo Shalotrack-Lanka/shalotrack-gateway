@@ -148,11 +148,11 @@ def process_packet(data, conn, addr):
         print("⚡ Status Packet")
 
         try:
-            device = get_device(addr[0])
+            device = get_device(imei="355172106043787")
 
             if not device:
                 print(
-                    f"❌ Unknown Device from IP: {addr[0]}"
+                    f"❌ Unknown Device from IMEI: " 
                 )
                 return
             else:
