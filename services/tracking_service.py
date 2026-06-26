@@ -262,7 +262,8 @@ def update_device_status(
     gps_signal,
     ignition_status,
     movement_status,
-    power_status
+    power_status,
+    now=datetime.utcnow()
 ):
 
     conn = get_db_connection()
@@ -305,14 +306,14 @@ def update_device_status(
         (
             device_id,
             True,
-            datetime.utcnow(),
-            datetime.utcnow(),
+            now,
+            now,
             gps_signal,
             battery_level,
             ignition_status,
             movement_status,
             power_status,
-            datetime.utcnow()
+            now
         )
     )
 

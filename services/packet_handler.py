@@ -1,12 +1,13 @@
 from parsers.v5_parser import (
     parse_login_packet,
     parse_location_packet,
-    build_ack
+    build_ack,
+    parse_status_packet
 )
 
 from services.device_registry import (
     get_device,
-    register_device
+    register_device,
 )
 
 from services.tracking_service import (
@@ -14,7 +15,8 @@ from services.tracking_service import (
     save_raw_packet,
     save_tracking,
     get_vehicle_by_device,
-    update_current_location
+    update_current_location,
+    update_device_status
 )
 
 
@@ -144,6 +146,35 @@ def process_packet(data, conn, addr):
     elif protocol == "13":
 
         print("⚡ Status Packet")
+
+        try:
+            device = get_device(addr[0])
+
+            if not device:
+                print(
+                    f"❌ Unknown Device from IP: {addr[0]}"
+                )
+                return
+            else:
+                status = parse_status_packet(raw)
+                update_device_status(
+                    device_id=device["device_id"],
+                    battery_level=status["battery_level"],
+                    gps_signal=status["gsm_signal"],
+                    ignition_status=status["ignition_status"],
+                    movement_status=location["speed"] > 0,
+                    power_status=1 if not status["power_cut"] else 2
+                )
+
+                print("Battery:", status["battery_level"])
+                print("Signal:", status["gsm_signal"])
+                print("Ignition:", status["ignition_status"])
+                print("Power Cut:", status["power_cut"])
+                print("Charging:", status["charging"])
+        
+        except Exception as ex:
+            print(ex)
+
 
     elif protocol == "23":
 
