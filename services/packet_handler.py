@@ -162,7 +162,7 @@ def process_packet(data, conn, addr):
                     battery_level=status["battery_level"],
                     gps_signal=status["gsm_signal"],
                     ignition_status=status["ignition_status"],
-                    movement_status=location["speed"] > 0,
+                    movement_status=False,
                     power_status=1 if not status["power_cut"] else 2
                 )
 
