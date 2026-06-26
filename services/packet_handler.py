@@ -110,6 +110,13 @@ def process_packet(data, conn, addr):
                 "355172106043787"
             )
 
+            save_raw_packet(
+                device_id=device["device_id"],
+                protocol_number=protocol,
+                raw_hex=hex_data,
+                parsed=True
+            )
+
             save_tracking(
                 device_id=device["device_id"],
                 latitude=location["latitude"],
@@ -157,6 +164,14 @@ def process_packet(data, conn, addr):
                 return
             else:
                 status = parse_status_packet(raw)
+
+                save_raw_packet(
+                    device_id=device["device_id"],
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
+
                 update_device_status(
                     device_id=device["device_id"],
                     battery_level=status["battery_level"],
