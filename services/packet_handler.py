@@ -19,6 +19,11 @@ from services.tracking_service import (
     update_device_status
 )
 
+from services.event_service import create_event
+
+from constants.event_types import *
+from constants.severity import *
+
 
 def process_packet(data, conn, addr):
 
@@ -81,6 +86,16 @@ def process_packet(data, conn, addr):
             print("📱 IMEI:", login["imei"])
             print("🆔 Device ID:", device_id)
             print("🔢 Serial:", login["serial"])
+
+            vehicle_id = get_vehicle_by_device(device_id)
+
+            create_event(
+                device_id=device_id,
+                vehicle_id=vehicle_id,
+                event_type=DEVICE_ONLINE,
+                severity=LOW,
+                description="Device connected to the gateway"
+            )
 
         except Exception as ex:
 

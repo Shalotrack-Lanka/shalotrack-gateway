@@ -322,3 +322,42 @@ def update_device_status(
 
     cursor.close()
     conn.close()
+
+
+def get_device_status(device_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            "IsOnline",
+            "BatteryLevel",
+            "GpsSignal",
+            "IgnitionStatus",
+            "MovementStatus",
+            "PowerStatus"
+        FROM "DeviceStatuses"
+        WHERE "DeviceId" = %s
+        LIMIT 1
+        """,
+        (device_id,)
+    )
+
+    result = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    if not result:
+        return None
+    
+    return{
+        "is_online": result[0],
+        "battery_level": result[1],
+        "gps_signal": result[2],
+        "ignition_status": result[3],
+        "movement_status": result[4],
+        "power_status": result[5]
+    }
