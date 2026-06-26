@@ -102,3 +102,19 @@ def build_ack(packet):
     )
 
     return response
+
+def parse_status_packet(packet):
+
+    terminal_info = packet[4]
+    voltage = packet[5]
+    gsm_signal = packet[6]
+
+    return {
+        "battery_level": voltage,
+        "gsm_signal": gsm_signal,
+        "ignition_status": bool(terminal_info & 0x02), ## representing 2bytes it takes
+        "power_cut": bool(terminal_info & 0x80),
+        "gps_tracking": bool(terminal_info & 0x40),
+        "charging": bool(terminal_info & 0x04),
+        "activated": bool(terminal_info & 0x01)
+    }

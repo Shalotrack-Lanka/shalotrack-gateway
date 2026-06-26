@@ -254,3 +254,69 @@ def update_current_location(
 
     cursor.close()
     conn.close()
+
+
+def update_device_status(
+    device_id,
+    battery_level,
+    gps_signal,
+    ignition_status,
+    movement_status,
+    power_status
+):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO "DeviceStatuses"
+        (
+            "DeviceId",
+            "IsOnline",
+            "LastHeartbeat",
+            "LastSeen",
+            "GpsSignal",
+            "BatteryLevel",
+            "IgnitionStatus",
+            "MovementStatus",
+            "PowerStatus",
+            "UpdatedAt"
+        )
+        VALUES
+        (
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+        )
+
+        ON CONFLICT ("DeviceId")
+
+        DO UPDATE SET
+
+            "IsOnline" = EXCLUDED."IsOnline",
+            "LastHeartbeat" = EXCLUDED."LastHeartbeat",
+            "LastSeen" = EXCLUDED."LastSeen",
+            "GpsSignal" = EXCLUDED."GpsSignal",
+            "BatteryLevel" = EXCLUDED."BatteryLevel",
+            "IgnitionStatus" = EXCLUDED."IgnitionStatus",
+            "MovementStatus" = EXCLUDED."MovementStatus",
+            "PowerStatus" = EXCLUDED."PowerStatus",
+            "UpdatedAt" = EXCLUDED."UpdatedAt"
+        """,
+        (
+            device_id,
+            True,
+            datetime.utcnow(),
+            datetime.utcnow(),
+            gps_signal,
+            battery_level,
+            ignition_status,
+            movement_status,
+            power_status,
+            datetime.utcnow()
+        )
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
