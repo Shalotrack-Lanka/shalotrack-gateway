@@ -277,144 +277,43 @@ def parse_alarm_packet(packet):
     }
 
 
-def parse_alarm_packet(packet):
+def get_alarm_name(alarm_type):
 
-    """
-    Protocol 0x26 Alarm Packet
-    GT06 / V5 Alarm Information
-    """
+    alarms = {
 
-    # --------------------------
-    # Date & Time
-    # --------------------------
+        0: "NORMAL",
 
-    year = packet[4] + 2000
-    month = packet[5]
-    day = packet[6]
+        1: "SOS",
 
-    hour = packet[7]
-    minute = packet[8]
-    second = packet[9]
+        2: "POWER_CUT",
 
-    timestamp = datetime(
-        year,
-        month,
-        day,
-        hour,
-        minute,
-        second
-    )
+        3: "SHOCK",
 
-    # --------------------------
-    # GPS
-    # --------------------------
+        4: "FENCE_IN",
 
-    satellites = packet[10] & 0x0F
+        5: "FENCE_OUT",
 
-    latitude_raw = int.from_bytes(
-        packet[11:15],
-        "big"
-    )
+        6: "OVERSPEED",
 
-    longitude_raw = int.from_bytes(
-        packet[15:19],
-        "big"
-    )
+        7: "LOW_BATTERY",
 
-    latitude = latitude_raw / 1800000
+        8: "VIBRATION",
 
-    longitude = longitude_raw / 1800000
+        9: "MOVE",
 
-    speed = packet[19]
+        10: "ACC_ON",
 
-    course_status = int.from_bytes(
-        packet[20:22],
-        "big"
-    )
+        11: "ACC_OFF",
 
-    # --------------------------
-    # LBS
-    # --------------------------
+        12: "TOW",
 
-    mcc = int.from_bytes(
-        packet[22:24],
-        "big"
-    )
+        13: "GPS_ANTENNA",
 
-    mnc = packet[24]
+        14: "EXTERNAL_POWER"
 
-    lac = int.from_bytes(
-        packet[25:27],
-        "big"
-    )
-
-    cell_id = int.from_bytes(
-        packet[27:30],
-        "big"
-    )
-
-    # --------------------------
-    # Terminal Information
-    # --------------------------
-
-    terminal_info = packet[30]
-
-    battery_level = packet[31]
-
-    gsm_signal = packet[32]
-
-    alarm_language = packet[33]
-
-    alarm_type = alarm_language >> 4
-
-    return {
-
-        "timestamp": timestamp,
-
-        "latitude": latitude,
-
-        "longitude": longitude,
-
-        "speed": speed,
-
-        "satellites": satellites,
-
-        "course_status": course_status,
-
-        "mcc": mcc,
-
-        "mnc": mnc,
-
-        "lac": lac,
-
-        "cell_id": cell_id,
-
-        "terminal_info": terminal_info,
-
-        "battery_level": battery_level,
-
-        "gsm_signal": gsm_signal,
-
-        "alarm_type": alarm_type,
-
-        "ignition_status": bool(
-            terminal_info & 0x02
-        ),
-
-        "power_cut": bool(
-            terminal_info & 0x80
-        ),
-
-        "gps_tracking": bool(
-            terminal_info & 0x40
-        ),
-
-        "charging": bool(
-            terminal_info & 0x04
-        ),
-
-        "activated": bool(
-            terminal_info & 0x01
-        )
     }
 
+    return alarms.get(
+        alarm_type,
+        "UNKNOWN"
+    )
