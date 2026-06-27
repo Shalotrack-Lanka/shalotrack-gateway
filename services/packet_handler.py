@@ -31,16 +31,24 @@ from constants.severity import Severity
 
 def process_packet(data, conn, addr):
 
-    hex_data = data.hex()
+    # FIX: Detect protocol correctly for both 7878 (short) and 7979 (long) frames.
+    # Previously hex_data[6:8] was used, which read the wrong byte offset for 7979
+    # frames — causing 94 packets to appear as protocol "08" and fall into Unknown.
+    raw = data
 
-    if len(hex_data) < 8:
+    if raw[0:2] == b"\x78\x78":
+        protocol = f"{raw[3]:02x}"
+
+    elif raw[0:2] == b"\x79\x79":
+        protocol = f"{raw[4]:02x}"
+
+    else:
+        print("❌ Invalid packet")
         return
-
-    protocol = hex_data[6:8]
 
     print("Protocol:", protocol)
 
-    raw = bytes.fromhex(hex_data)
+    hex_data = raw.hex()
 
     # FIX (Bug 3): Use current_imei to track the result instead of returning early.
     # The ACK must always be sent at the end, so we never return mid-function.
@@ -303,6 +311,81 @@ def process_packet(data, conn, addr):
 
             print(f"❌ ALARM ERROR: {ex}")
 
+    elif protocol == "94":
+
+        print("📡 Information Packet")
+
+        try:
+
+            device = get_device("355172106043787")
+
+            if device:
+
+                RawPacketRepository.save(
+                    device_id=device["device_id"],
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
+
+                print("✅ Information Packet Saved")
+
+                current_imei = "355172106043787"
+
+        except Exception as ex:
+
+            print(f"❌ INFO PACKET ERROR: {ex}")
+
+    elif protocol == "8a":
+
+        print("📨 Command Response Packet")
+
+        try:
+
+            device = get_device("355172106043787")
+
+            if device:
+
+                RawPacketRepository.save(
+                    device_id=device["device_id"],
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
+
+                print("✅ Command Response Saved")
+
+                current_imei = "355172106043787"
+
+        except Exception as ex:
+
+            print(f"❌ COMMAND RESPONSE ERROR: {ex}")
+
+    elif protocol == "6e":
+
+        print("⚙️ Configuration Packet")
+
+        try:
+
+            device = get_device("355172106043787")
+
+            if device:
+
+                RawPacketRepository.save(
+                    device_id=device["device_id"],
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
+
+                print("✅ Configuration Packet Saved")
+
+                current_imei = "355172106043787"
+
+        except Exception as ex:
+
+            print(f"❌ CONFIGURATION PACKET ERROR: {ex}")
+
     else:
 
         print("❓ Unknown Packet")
@@ -312,7 +395,7 @@ def process_packet(data, conn, addr):
     # causing trackers to never receive acknowledgment and reconnect in a loop.
     try:
 
-        ack = build_ack(data)
+        ack = build_ack(raw)
 
         conn.send(ack)
 
