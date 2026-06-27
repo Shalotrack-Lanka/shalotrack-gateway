@@ -1,42 +1,34 @@
 from enum import Enum
 
-
 class EventType(Enum):
-
-    # Device Connectivity
     DEVICE_ONLINE = "DEVICE_ONLINE"
     DEVICE_OFFLINE = "DEVICE_OFFLINE"
 
-    # Ignition
+    GPS_RECEIVED = "GPS_RECEIVED"
+
+    HEARTBEAT = "HEARTBEAT"
+
     IGNITION_ON = "IGNITION_ON"
     IGNITION_OFF = "IGNITION_OFF"
 
-    # Movement
     MOVEMENT_STARTED = "MOVEMENT_STARTED"
     MOVEMENT_STOPPED = "MOVEMENT_STOPPED"
 
-    # Battery
     LOW_BATTERY = "LOW_BATTERY"
 
-    # External Power
     POWER_CONNECTED = "POWER_CONNECTED"
     POWER_DISCONNECTED = "POWER_DISCONNECTED"
 
-    # GPS
     GPS_FIX_LOST = "GPS_FIX_LOST"
     GPS_FIX_RESTORED = "GPS_FIX_RESTORED"
 
-    # Driving
     OVERSPEED = "OVERSPEED"
 
-    # SOS
-    SOS = "SOS"
-
-    # GeoFence
     GEOFENCE_ENTER = "GEOFENCE_ENTER"
     GEOFENCE_EXIT = "GEOFENCE_EXIT"
 
-    # Commands
+    SOS = "SOS"
+
     ENGINE_CUT = "ENGINE_CUT"
     ENGINE_RESTORED = "ENGINE_RESTORED"
 
