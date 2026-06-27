@@ -1,8 +1,13 @@
 from datetime import datetime
+
 from database import get_db_connection
+
 from models.device_status import DeviceStatus
 
+
 class StatusRepository:
+
+
     @staticmethod
     def find_by_device(device_id: str) -> DeviceStatus | None:
 

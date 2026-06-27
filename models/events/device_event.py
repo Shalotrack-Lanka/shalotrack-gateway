@@ -11,4 +11,3 @@ class DeviceEvent:
     latitude: float | None = None
     longitude: float | None = None
     raw_packet_id: int | None = None
-    created_at: datetime | None = None

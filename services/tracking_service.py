@@ -202,3 +202,127 @@ def update_device_status(
 
     cursor.close()
     conn.close()
+
+
+def update_heartbeat(device_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow()
+
+    cursor.execute(
+        """
+        UPDATE "DeviceStatuses"
+        SET
+            "IsOnline" = TRUE,
+            "LastHeartbeat" = %s,
+            "LastSeen" = %s,
+            "UpdatedAt" = %s
+        WHERE "DeviceId"=%s
+        """,
+        (
+            now,
+            now,
+            now,
+            device_id
+        )
+    )
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def set_device_offline(device_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow()
+
+    cursor.execute(
+        """
+        UPDATE "DeviceStatuses"
+
+        SET
+
+            "IsOnline" = FALSE,
+
+            "UpdatedAt" = %s
+
+        WHERE "DeviceId" = %s
+        """,
+        (
+            now,
+            device_id
+        )
+    )
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def update_last_seen(device_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    now = datetime.utcnow()
+
+    cursor.execute(
+        """
+        UPDATE "DeviceStatuses"
+
+        SET
+
+            "LastSeen" = %s,
+
+            "UpdatedAt" = %s
+
+        WHERE "DeviceId" = %s
+        """,
+        (
+            now,
+            now,
+            device_id
+        )
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+
+def set_device_online(device_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    now = datetime.utcnow()
+
+    cursor.execute(
+        """
+        UPDATE "DeviceStatuses"
+
+        SET
+
+            "IsOnline" = TRUE,
+
+            "LastSeen" = %s,
+
+            "UpdatedAt" = %s
+
+        WHERE "DeviceId" = %s
+        """,
+        (
+            now,
+            now,
+            device_id
+        )
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+

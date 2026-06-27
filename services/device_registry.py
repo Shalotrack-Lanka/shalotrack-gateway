@@ -1,5 +1,6 @@
 connected_devices = {}
 
+
 def register_device(
     imei,
     ip,
@@ -7,10 +8,23 @@ def register_device(
 ):
 
     connected_devices[imei] = {
-        "ip": ip,
-        "device_id": device_id
+
+        "device_id": device_id,
+
+        "ip": ip
+
     }
 
 
 def get_device(imei):
-    return connected_devices.get(imei)
+
+    return connected_devices.get(
+        imei
+    )
+
+
+def unregister_device(imei):
+
+    if imei in connected_devices:
+
+        del connected_devices[imei]

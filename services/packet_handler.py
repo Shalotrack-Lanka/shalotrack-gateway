@@ -2,9 +2,11 @@ from parsers.v5_parser import (
     parse_login_packet,
     parse_location_packet,
     parse_status_packet,
+    parse_heartbeat_packet,
+    parse_alarm_packet,
+    get_alarm_name,
     build_ack
 )
-
 from services.device_registry import (
     register_device,
     get_device
@@ -13,15 +15,19 @@ from services.device_registry import (
 from services.tracking_service import (
     save_tracking,
     update_current_location,
-    update_device_status
+    update_device_status,
+    update_heartbeat
 )
 
 from repositories.device_repository import DeviceRepository
 from repositories.raw_packet_repository import RawPacketRepository
+
 from services.event_service import create_event
 
 from constants.event_types import EventType
 from constants.severity import Severity
+
+
 
 def process_packet(data, conn, addr):
 
@@ -35,6 +41,10 @@ def process_packet(data, conn, addr):
     print("Protocol:", protocol)
 
     raw = bytes.fromhex(hex_data)
+
+    # FIX (Bug 3): Use current_imei to track the result instead of returning early.
+    # The ACK must always be sent at the end, so we never return mid-function.
+    current_imei = None
 
     if protocol == "01":
 
@@ -57,41 +67,44 @@ def process_packet(data, conn, addr):
                 print(
                     f"❌ Unauthorized Device: {login['imei']}"
                 )
+                current_imei = None  # explicitly reject — ACK still sent, but device stays unregistered
 
-                return
+            else:
 
-            print("DEBUG 3 - Device Authorized")
+                print("DEBUG 3 - Device Authorized")
 
-            register_device(
-                login["imei"],
-                addr[0],
-                device_id
-            )
+                register_device(
+                    login["imei"],
+                    addr[0],
+                    device_id
+                )
 
-            print("DEBUG 4 - Device Registered")
+                print("DEBUG 4 - Device Registered")
 
-            RawPacketRepository.save(
-                device_id=device_id,
-                protocol_number=protocol,
-                raw_hex=hex_data,
-                parsed=True
-            )
+                RawPacketRepository.save(
+                    device_id=device_id,
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
 
-            print("DEBUG 5 - Raw Packet Saved")
+                print("DEBUG 5 - Raw Packet Saved")
 
-            print("📱 IMEI:", login["imei"])
-            print("🆔 Device ID:", device_id)
-            print("🔢 Serial:", login["serial"])
+                print("📱 IMEI:", login["imei"])
+                print("🆔 Device ID:", device_id)
+                print("🔢 Serial:", login["serial"])
 
-            vehicle_id = DeviceRepository.get_vehicle_by_device(device_id)
+                vehicle_id = DeviceRepository.get_vehicle_by_device(device_id)
 
-            create_event(
-                device_id=device_id,
-                vehicle_id=vehicle_id,
-                event_type=EventType.DEVICE_ONLINE.value,
-                severity=Severity.LOW,
-                description="Device connected to the gateway"
-            )
+                create_event(
+                    device_id=device_id,
+                    vehicle_id=vehicle_id,
+                    event_type=EventType.DEVICE_ONLINE.value,
+                    severity=Severity.LOW,
+                    description="Device connected to the gateway"
+                )
+
+                current_imei = login["imei"]  # FIX (Bug 3): store instead of return
 
         except Exception as ex:
 
@@ -116,10 +129,8 @@ def process_packet(data, conn, addr):
                 f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}"
             )
 
-            #temporary device ID for testing - replace with actual device lookup in production
-            device = get_device(
-                "355172106043787"
-            )
+            # TODO (Bug 4): Replace hardcoded IMEI with current_imei once login flow is wired end-to-end
+            device = get_device("355172106043787")
 
             RawPacketRepository.save(
                 device_id=device["device_id"],
@@ -136,7 +147,7 @@ def process_packet(data, conn, addr):
                 event_time=location["timestamp"]
             )
 
-            print(" GPS Tracking Saved")
+            print("✅ GPS Tracking Saved")
 
             vehicle_id = DeviceRepository.get_vehicle_by_device(device["device_id"])
 
@@ -150,8 +161,10 @@ def process_packet(data, conn, addr):
                     speed=location["speed"],
                     event_time=location["timestamp"]
                 )
-            
-            print(" Current Location Updated")
+
+            print("✅ Current Location Updated")
+
+            current_imei = "355172106043787"  # FIX (Bug 3): store instead of return
 
         except Exception as ex:
 
@@ -167,10 +180,8 @@ def process_packet(data, conn, addr):
             device = get_device(imei="355172106043787")
 
             if not device:
-                print(
-                    f"❌ Unknown Device from IMEI: " 
-                )
-                return
+                print("❌ Unknown Device")
+
             else:
                 status = parse_status_packet(raw)
 
@@ -186,7 +197,7 @@ def process_packet(data, conn, addr):
                     battery_level=status["battery_level"],
                     gps_signal=status["gsm_signal"],
                     ignition_status=status["ignition_status"],
-                    movement_status=False,
+                    movement_status=status["ignition_status"],  # no speed in status packet; ignition is the best proxy
                     power_status=1 if not status["power_cut"] else 2
                 )
 
@@ -195,19 +206,110 @@ def process_packet(data, conn, addr):
                 print("Ignition:", status["ignition_status"])
                 print("Power Cut:", status["power_cut"])
                 print("Charging:", status["charging"])
-        
+
+                current_imei = "355172106043787"  # FIX (Bug 3): store instead of return
+
         except Exception as ex:
             print(ex)
-
 
     elif protocol == "23":
 
         print("💓 Heartbeat Packet")
 
+        try:
+
+            device = get_device("355172106043787")
+
+            if not device:
+
+                print("❌ Unknown Device")
+
+            else:
+
+                heartbeat = parse_heartbeat_packet(raw)
+
+                RawPacketRepository.save(
+                    device_id=device["device_id"],
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
+
+                # FIX (Bug 1): device is a dict, not a string — use device["device_id"].
+                # FIX (Bug 1): heartbeat["heartbeat"] doesn't exist — use correct field names.
+                update_device_status(
+                    device_id=device["device_id"],
+                    battery_level=heartbeat["battery_level"],
+                    gps_signal=heartbeat["gsm_signal"],
+                    ignition_status=heartbeat["ignition_status"],
+                    movement_status=heartbeat["ignition_status"],  # no speed in heartbeat packet; ignition is the best proxy
+                    power_status=1 if not heartbeat["power_cut"] else 2
+                )
+
+                update_heartbeat(
+                    device["device_id"]
+                )
+
+                print("💓 Heartbeat Updated")
+                current_imei = "355172106043787"  # FIX (Bug 3): store instead of return
+
+        except Exception as ex:
+
+            print(f"❌ HEARTBEAT ERROR: {ex}")
+
+    elif protocol == "26":
+
+        print("🚨 Alarm Packet")
+
+        try:
+
+            device = get_device("355172106043787")
+
+            if not device:
+
+                print("❌ Unknown Device")
+
+            else:
+
+                alarm = parse_alarm_packet(raw)
+
+                RawPacketRepository.save(
+                    device_id=device["device_id"],
+                    protocol_number=protocol,
+                    raw_hex=hex_data,
+                    parsed=True
+                )
+
+                print("🚨 Alarm Packet Saved")
+                print(
+                    "Alarm :",
+                    get_alarm_name(
+                        alarm["alarm_type"]
+                    )
+                )
+                print("Latitude :", alarm["latitude"])
+                print("Longitude :", alarm["longitude"])
+                print("Speed :", alarm["speed"])
+                print("Timestamp :", alarm["timestamp"])
+                print("Battery :", alarm["battery_level"])
+                print("Signal :", alarm["gsm_signal"])
+                print("Charging :", alarm["charging"])
+                print("Power Cut :", alarm["power_cut"])
+                print("Ignition :", alarm["ignition_status"])
+
+                current_imei = "355172106043787"  # FIX (Bug 3): store instead of return
+
+        except Exception as ex:
+
+            print(f"❌ ALARM ERROR: {ex}")
+
     else:
 
         print("❓ Unknown Packet")
 
+    # FIX (Bug 3): ACK is now always sent at the end, regardless of protocol.
+    # Previously, every early `return` inside each branch silently skipped this block,
+    # causing trackers to never receive acknowledgment and reconnect in a loop.
     try:
 
         ack = build_ack(data)
@@ -224,3 +326,5 @@ def process_packet(data, conn, addr):
         print(
             f"❌ ACK ERROR: {ex}"
         )
+
+    return current_imei

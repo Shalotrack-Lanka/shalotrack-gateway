@@ -118,3 +118,303 @@ def parse_status_packet(packet):
         "charging": bool(terminal_info & 0x04),
         "activated": bool(terminal_info & 0x01)
     }
+
+
+def parse_heartbeat_packet(packet):
+    terminal_info = packet[4]
+    voltage = packet[5]
+    gsm_signal = packet[6]
+
+    return {
+        "battery_level": voltage,
+        "gsm_signal": gsm_signal,
+        "ignition_status": bool(terminal_info & 0x02),
+        "power_cut": bool(terminal_info & 0x80),
+        "gps_tracking": bool(terminal_info & 0x40),
+        "charging": bool(terminal_info & 0x04),
+        "activated": bool(terminal_info & 0x01)
+    }
+
+def parse_alarm_packet(packet):
+
+    """
+    Protocol 0x26 Alarm Packet
+    GT06 / V5 Alarm Information
+    """
+
+    # --------------------------
+    # Date & Time
+    # --------------------------
+
+    year = packet[4] + 2000
+    month = packet[5]
+    day = packet[6]
+
+    hour = packet[7]
+    minute = packet[8]
+    second = packet[9]
+
+    timestamp = datetime(
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second
+    )
+
+    # --------------------------
+    # GPS
+    # --------------------------
+
+    satellites = packet[10] & 0x0F
+
+    latitude_raw = int.from_bytes(
+        packet[11:15],
+        "big"
+    )
+
+    longitude_raw = int.from_bytes(
+        packet[15:19],
+        "big"
+    )
+
+    latitude = latitude_raw / 1800000
+
+    longitude = longitude_raw / 1800000
+
+    speed = packet[19]
+
+    course_status = int.from_bytes(
+        packet[20:22],
+        "big"
+    )
+
+    # --------------------------
+    # LBS
+    # --------------------------
+
+    mcc = int.from_bytes(
+        packet[22:24],
+        "big"
+    )
+
+    mnc = packet[24]
+
+    lac = int.from_bytes(
+        packet[25:27],
+        "big"
+    )
+
+    cell_id = int.from_bytes(
+        packet[27:30],
+        "big"
+    )
+
+    # --------------------------
+    # Terminal Information
+    # --------------------------
+
+    terminal_info = packet[30]
+
+    battery_level = packet[31]
+
+    gsm_signal = packet[32]
+
+    alarm_language = packet[33]
+
+    alarm_type = alarm_language >> 4
+
+    return {
+
+        "timestamp": timestamp,
+
+        "latitude": latitude,
+
+        "longitude": longitude,
+
+        "speed": speed,
+
+        "satellites": satellites,
+
+        "course_status": course_status,
+
+        "mcc": mcc,
+
+        "mnc": mnc,
+
+        "lac": lac,
+
+        "cell_id": cell_id,
+
+        "terminal_info": terminal_info,
+
+        "battery_level": battery_level,
+
+        "gsm_signal": gsm_signal,
+
+        "alarm_type": alarm_type,
+
+        "ignition_status": bool(
+            terminal_info & 0x02
+        ),
+
+        "power_cut": bool(
+            terminal_info & 0x80
+        ),
+
+        "gps_tracking": bool(
+            terminal_info & 0x40
+        ),
+
+        "charging": bool(
+            terminal_info & 0x04
+        ),
+
+        "activated": bool(
+            terminal_info & 0x01
+        )
+    }
+
+
+def parse_alarm_packet(packet):
+
+    """
+    Protocol 0x26 Alarm Packet
+    GT06 / V5 Alarm Information
+    """
+
+    # --------------------------
+    # Date & Time
+    # --------------------------
+
+    year = packet[4] + 2000
+    month = packet[5]
+    day = packet[6]
+
+    hour = packet[7]
+    minute = packet[8]
+    second = packet[9]
+
+    timestamp = datetime(
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        second
+    )
+
+    # --------------------------
+    # GPS
+    # --------------------------
+
+    satellites = packet[10] & 0x0F
+
+    latitude_raw = int.from_bytes(
+        packet[11:15],
+        "big"
+    )
+
+    longitude_raw = int.from_bytes(
+        packet[15:19],
+        "big"
+    )
+
+    latitude = latitude_raw / 1800000
+
+    longitude = longitude_raw / 1800000
+
+    speed = packet[19]
+
+    course_status = int.from_bytes(
+        packet[20:22],
+        "big"
+    )
+
+    # --------------------------
+    # LBS
+    # --------------------------
+
+    mcc = int.from_bytes(
+        packet[22:24],
+        "big"
+    )
+
+    mnc = packet[24]
+
+    lac = int.from_bytes(
+        packet[25:27],
+        "big"
+    )
+
+    cell_id = int.from_bytes(
+        packet[27:30],
+        "big"
+    )
+
+    # --------------------------
+    # Terminal Information
+    # --------------------------
+
+    terminal_info = packet[30]
+
+    battery_level = packet[31]
+
+    gsm_signal = packet[32]
+
+    alarm_language = packet[33]
+
+    alarm_type = alarm_language >> 4
+
+    return {
+
+        "timestamp": timestamp,
+
+        "latitude": latitude,
+
+        "longitude": longitude,
+
+        "speed": speed,
+
+        "satellites": satellites,
+
+        "course_status": course_status,
+
+        "mcc": mcc,
+
+        "mnc": mnc,
+
+        "lac": lac,
+
+        "cell_id": cell_id,
+
+        "terminal_info": terminal_info,
+
+        "battery_level": battery_level,
+
+        "gsm_signal": gsm_signal,
+
+        "alarm_type": alarm_type,
+
+        "ignition_status": bool(
+            terminal_info & 0x02
+        ),
+
+        "power_cut": bool(
+            terminal_info & 0x80
+        ),
+
+        "gps_tracking": bool(
+            terminal_info & 0x40
+        ),
+
+        "charging": bool(
+            terminal_info & 0x04
+        ),
+
+        "activated": bool(
+            terminal_info & 0x01
+        )
+    }
+
