@@ -1,29 +1,27 @@
 from parsers.v5_parser import (
     parse_login_packet,
     parse_location_packet,
-    build_ack,
-    parse_status_packet
+    parse_status_packet,
+    build_ack
 )
 
 from services.device_registry import (
-    get_device,
     register_device,
+    get_device
 )
 
 from services.tracking_service import (
-    get_device_by_imei,
-    save_raw_packet,
     save_tracking,
-    get_vehicle_by_device,
     update_current_location,
     update_device_status
 )
 
+from repositories.device_repository import DeviceRepository
+from repositories.raw_packet_repository import RawPacketRepository
 from services.event_service import create_event
 
-from constants.event_types import *
-from constants.severity import *
-
+from constants.event_types import EventType
+from constants.severity import Severity
 
 def process_packet(data, conn, addr):
 
@@ -48,9 +46,7 @@ def process_packet(data, conn, addr):
 
             print("DEBUG 1 - Login Parsed")
 
-            device_id = get_device_by_imei(
-                login["imei"]
-            )
+            device_id = DeviceRepository.get_device_by_imei(login["imei"])
 
             print(
                 f"DEBUG 2 - Device Lookup Result: {device_id}"
@@ -74,7 +70,7 @@ def process_packet(data, conn, addr):
 
             print("DEBUG 4 - Device Registered")
 
-            save_raw_packet(
+            RawPacketRepository.save(
                 device_id=device_id,
                 protocol_number=protocol,
                 raw_hex=hex_data,
@@ -87,13 +83,13 @@ def process_packet(data, conn, addr):
             print("🆔 Device ID:", device_id)
             print("🔢 Serial:", login["serial"])
 
-            vehicle_id = get_vehicle_by_device(device_id)
+            vehicle_id = DeviceRepository.get_vehicle_by_device(device_id)
 
             create_event(
                 device_id=device_id,
                 vehicle_id=vehicle_id,
-                event_type=DEVICE_ONLINE,
-                severity=LOW,
+                event_type=EventType.DEVICE_ONLINE.value,
+                severity=Severity.LOW,
                 description="Device connected to the gateway"
             )
 
@@ -125,7 +121,7 @@ def process_packet(data, conn, addr):
                 "355172106043787"
             )
 
-            save_raw_packet(
+            RawPacketRepository.save(
                 device_id=device["device_id"],
                 protocol_number=protocol,
                 raw_hex=hex_data,
@@ -142,9 +138,7 @@ def process_packet(data, conn, addr):
 
             print(" GPS Tracking Saved")
 
-            vehicle_id = get_vehicle_by_device(
-                device["device_id"]
-            )
+            vehicle_id = DeviceRepository.get_vehicle_by_device(device["device_id"])
 
             if vehicle_id:
 
@@ -180,7 +174,7 @@ def process_packet(data, conn, addr):
             else:
                 status = parse_status_packet(raw)
 
-                save_raw_packet(
+                RawPacketRepository.save(
                     device_id=device["device_id"],
                     protocol_number=protocol,
                     raw_hex=hex_data,
