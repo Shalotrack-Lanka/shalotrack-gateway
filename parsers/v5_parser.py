@@ -259,6 +259,43 @@ def parse_alarm_packet(packet):
     }
 
 
+def parse_information_packet(packet):
+    # ---------------------------------------
+    # Skip protocol byte (0x94)
+    # Skip CRC + Serial + End Marker
+    # ---------------------------------------
+
+    if packet[:2] == b"\x79\x79":
+        payload = packet[5:-6]
+    else:
+        payload = packet[4:-6]
+
+    result = {
+        "is_ascii": False,
+        "raw_hex": payload.hex(),
+        "values": {}
+    }
+
+    try:
+
+        text = payload.decode("ascii").strip("\x00")
+        # Require printable characters only
+        if all(32 <= ord(c) <= 126 for c in text):
+
+            result["is_ascii"] = True
+            result["text"] = text
+
+            values = {}
+
+            for item in text.split(";"):
+                if "=" in item:
+                    key, value = item.split("=", 1)
+                    values[key.strip()] = value.strip()
+            result["values"] = values
+    except UnicodeDecodeError:
+        pass
+    return result
+
 def get_alarm_name(alarm_type: int) -> str:
     """Return a human-readable name for a Protocol 0x26 alarm type code."""
 

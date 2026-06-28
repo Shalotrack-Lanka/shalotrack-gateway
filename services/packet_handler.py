@@ -4,9 +4,13 @@ from parsers.v5_parser import (
     parse_status_packet,
     parse_heartbeat_packet,
     parse_alarm_packet,
+    parse_information_packet,
     get_alarm_name,
     build_ack
 )
+
+from parsers.information_interpreter import interpret_information
+
 from services.device_registry import (
     register_device,
     get_device
@@ -319,7 +323,11 @@ def process_packet(data, conn, addr):
 
             device = get_device("355172106043787")
 
-            if device:
+            if not device:
+                print("Unknown Device")
+            else:
+
+                info = parse_information_packet(raw)
 
                 RawPacketRepository.save(
                     device_id=device["device_id"],
@@ -328,8 +336,23 @@ def process_packet(data, conn, addr):
                     parsed=True
                 )
 
-                print("✅ Information Packet Saved")
+                print("──────── Information ────────")
 
+                if info["is_ascii"]:
+                    print("Type : ASCII Configuration")
+                    configuration = interpret_information(info["values"])
+                    print("──────── Device Configuration ────────")
+                    for key, value in configuration.items():
+                        print(f"{key:<20}: {value}")
+                    print("──────────────────────────────────────")
+
+                else:
+
+                    print("Type : Binary")
+                    print("Payload :", info["raw_hex"])
+
+                print("─────────────────────────────")
+                
                 current_imei = "355172106043787"
 
         except Exception as ex:
