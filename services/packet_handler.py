@@ -126,7 +126,8 @@ def process_packet(data, conn, addr):
                 register_device(
                     login["imei"],
                     addr[0],
-                    device_id
+                    device_id,
+                    conn
                 )
 
                 print("DEBUG 4 - Device Registered")

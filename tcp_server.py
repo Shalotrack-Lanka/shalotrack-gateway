@@ -5,7 +5,8 @@ import threading
 from services.packet_handler import process_packet
 from services.device_registry import (
     get_device,
-    unregister_device
+    unregister_device,
+    update_last_seen
 )
 
 from services.tracking_service import (
@@ -42,6 +43,9 @@ def handle_device(conn, addr):
                 conn,
                 addr
             )
+
+            if imei:
+                update_last_seen(imei)
 
     except socket.timeout:
 
