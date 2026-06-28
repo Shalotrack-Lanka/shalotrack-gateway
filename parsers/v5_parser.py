@@ -86,10 +86,10 @@ def parse_location_packet(raw):
     is_west = bool(course_status & 0x0800)
     gps_fixed = bool(course_status & 0x1000)
 
-    if is_south:
-        latitude = -latitude
-    if is_west:
-        longitude = -longitude
+    #if is_south:
+    #    latitude = -latitude
+    #if is_west:
+    #    longitude = -longitude
 
     return {
         "latitude": latitude,
@@ -206,10 +206,10 @@ def parse_alarm_packet(packet):
     is_west = bool(course_status & 0x0800)
     gps_fixed = bool(course_status & 0x1000)
 
-    if is_south:
-        latitude = -latitude
-    if is_west:
-        longitude = -longitude
+    #if is_south:
+    #    latitude = -latitude
+    #if is_west:
+    #    longitude = -longitude
 
     # --------------------------
     # LBS
