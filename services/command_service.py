@@ -1,7 +1,7 @@
 from services.device_registry import (
-    get_device,
     get_socket,
-    get_all_devices
+    get_all_devices,
+    get_device
 )
 
 from utils.command_builder import (
@@ -18,18 +18,17 @@ def send_command(imei, command):
 
     if not sock:
         raise Exception("Device Offline")
-    
-    print("===================================")
-    print("Sending bytes:")
-    print("=" * 50)
-    print("Sending packet:")
-    print(command.hex().upper())
-    print("=" * 50)
-    print("===================================")
+
+    print("\n" + "=" * 60)
+    print("📤 Sending Command")
+    print("=" * 60)
+    print(f"IMEI   : {imei}")
+    print(f"Length : {len(command)} bytes")
+    print(f"HEX    : {command.hex().upper()}")
+    print("=" * 60 + "\n")
 
     sock.sendall(command)
 
-    print(f"📤 Command sent to {imei}: {command.hex().upper()}")
     return True
 
 
@@ -74,7 +73,6 @@ def resume_engine(imei):
         imei,
         command
     )
-
     return command
 
 
