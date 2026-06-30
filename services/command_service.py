@@ -21,8 +21,10 @@ def send_command(imei, command):
     
     print("===================================")
     print("Sending bytes:")
-    print(command)
-    print(command.hex())
+    print("=" * 50)
+    print("Sending packet:")
+    print(command.hex().upper())
+    print("=" * 50)
     print("===================================")
 
     sock.sendall(command)

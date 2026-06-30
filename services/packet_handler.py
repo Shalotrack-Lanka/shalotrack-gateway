@@ -360,6 +360,57 @@ def process_packet(data, conn, addr):
 
             print(f"❌ COMMAND RESPONSE ERROR: {ex}")
 
+    elif protocol == "15":
+        print("📨 String Response Packet")
+        try:
+
+            device = _get_device()
+
+            if device:
+
+                _save_raw(
+                    device["device_id"],
+                    protocol,
+                    hex_data
+                )
+
+                print("✅ String Response Saved")
+
+                # -------------------------
+                # Decode ASCII payload
+                # -------------------------
+
+                try:
+
+                    if raw[:2] == b"\x79\x79":
+                        payload = raw[6:-6]
+                    else:
+                        payload = raw[5:-6]
+
+                    text = payload.decode(
+                        "ascii",
+                        errors="ignore"
+                    )
+
+                    print("Response :", text)
+
+                except Exception:
+                    
+                    print("Raw HEX :", hex_data)
+                    print("ASCII :", text)
+
+                    print("ASCII Bytes:")
+                    for b in payload:
+                        print(
+                            f"{b:02X} -> {chr(b) if 32 <= b <= 126 else '.'}"
+                        )
+
+                current_imei = TEST_IMEI
+
+        except Exception as ex:
+
+            print(f"❌ STRING RESPONSE ERROR: {ex}")
+
     elif protocol == "6e":
 
         print("⚙️ Configuration Packet")
@@ -382,7 +433,17 @@ def process_packet(data, conn, addr):
 
     else:
 
-        _log_unknown(protocol, raw, hex_data)
+        print("\n========== UNKNOWN PACKET ==========")
+        print("Protocol :", protocol)
+        print("Length   :", len(raw))
+        print("Raw HEX  :", hex_data)
+
+        try:
+            print("ASCII    :", raw.decode("ascii"))
+        except:
+            pass
+
+        print("====================================\n")
 
     # FIX (Bug 3): ACK is now always sent at the end, regardless of protocol.
     # Previously, every early `return` inside each branch silently skipped this block,
