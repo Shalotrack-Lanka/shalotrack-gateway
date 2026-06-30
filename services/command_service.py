@@ -18,6 +18,12 @@ def send_command(imei, command):
 
     if not sock:
         raise Exception("Device Offline")
+    
+    print("===================================")
+    print("Sending bytes:")
+    print(command)
+    print(command.hex())
+    print("===================================")
 
     sock.sendall(command)
 
