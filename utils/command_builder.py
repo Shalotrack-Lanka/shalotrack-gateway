@@ -51,6 +51,22 @@ def build_where():
     return build_command("WHERE#")
 
 
+def build_status():
+    return build_command("STATUS#")
+
+
+def build_version():
+    return build_command("VERSION#")
+
+
+def build_imei():
+    return build_command("IMEI#")
+
+
+def build_params():
+    return build_command("PARAM#")
+
+
 def build_reset():
     return build_command("RESET#")
 
