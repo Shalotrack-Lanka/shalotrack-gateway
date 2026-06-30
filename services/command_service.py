@@ -29,7 +29,7 @@ def send_command(imei, command):
 
     sock.sendall(command)
 
-    print(f"📤 Command sent to {imei}: {command.decode()}")
+    print(f"📤 Command sent to {imei}: {command.hex().upper()}")
     return True
 
 
