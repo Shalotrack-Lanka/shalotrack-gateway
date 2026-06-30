@@ -360,8 +360,10 @@ def process_packet(data, conn, addr):
 
             print(f"❌ COMMAND RESPONSE ERROR: {ex}")
 
-    elif protocol == "15":
-        print("📨 String Response Packet")
+    elif protocol == "21":
+
+        print("📨 Command Text Response")
+
         try:
 
             device = _get_device()
@@ -374,42 +376,26 @@ def process_packet(data, conn, addr):
                     hex_data
                 )
 
-                print("✅ String Response Saved")
+                if raw[:2] == b"\x79\x79":
+                    payload = raw[10:-6]
+                else:
+                    payload = raw[9:-6]
 
-                # -------------------------
-                # Decode ASCII payload
-                # -------------------------
+                text = payload.decode(
+                    "ascii",
+                    errors="ignore"
+                )
 
-                try:
-
-                    if raw[:2] == b"\x79\x79":
-                        payload = raw[6:-6]
-                    else:
-                        payload = raw[5:-6]
-
-                    text = payload.decode(
-                        "ascii",
-                        errors="ignore"
-                    )
-
-                    print("Response :", text)
-
-                except Exception:
-                    
-                    print("Raw HEX :", hex_data)
-                    print("ASCII :", text)
-
-                    print("ASCII Bytes:")
-                    for b in payload:
-                        print(
-                            f"{b:02X} -> {chr(b) if 32 <= b <= 126 else '.'}"
-                        )
+                print()
+                print("=" * 60)
+                print(text)
+                print("=" * 60)
 
                 current_imei = TEST_IMEI
 
         except Exception as ex:
 
-            print(f"❌ STRING RESPONSE ERROR: {ex}")
+            print(ex)
 
     elif protocol == "6e":
 
