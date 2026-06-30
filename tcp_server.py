@@ -15,6 +15,8 @@ from services.tracking_service import (
 
 from utils.logger import log
 
+from console import start_console
+
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
 
@@ -99,6 +101,12 @@ def start_server():
     )
 
     server.listen(5)
+
+    ##testing commands
+    threading.Thread(
+        target=start_console,
+        daemon=True
+    ).start()
 
     log(
         f"🚀 TCP Server listening on port {PORT}"
