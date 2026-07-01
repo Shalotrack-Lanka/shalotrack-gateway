@@ -20,6 +20,15 @@ def register_device(
 
     }
 
+def get_imei_by_socket(conn):
+
+    for imei, device in connected_devices.items():
+
+        if device["socket"] == conn:
+            return imei
+
+    return None
+
 
 def get_device(imei):
     return connected_devices.get(imei)

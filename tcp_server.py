@@ -17,6 +17,8 @@ from utils.logger import log
 
 from console import start_console
 
+from utils.packet_buffer import extract_packets
+
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
 
@@ -26,6 +28,7 @@ def handle_device(conn, addr):
     log(f"✅ Device connected: {addr}")
 
     imei = None
+    buffer = b""
 
     try:
 
@@ -33,21 +36,28 @@ def handle_device(conn, addr):
 
         while True:
 
-            data = conn.recv(1024)
+            data = conn.recv(4096)
 
             if not data:
                 break
 
-            log(f"RAW DATA: {data.hex()}")
+            buffer += data
 
-            imei = process_packet(
-                data,
-                conn,
-                addr
-            )
+            packets, buffer = extract_packets(buffer)
 
-            if imei:
-                update_last_seen(imei)
+            for packet in packets:
+
+                log(f"RAW DATA: {packet.hex()}")
+
+                packet_imei = process_packet(
+                    packet,
+                    conn,
+                    addr
+                )
+
+                if packet_imei:
+                    imei = packet_imei
+                    update_last_seen(imei)
 
     except socket.timeout:
 
@@ -108,22 +118,19 @@ def start_server():
         daemon=True
     ).start()
 
-    log(
-        f"🚀 TCP Server listening on port {PORT}"
-    )
+    log(f"🚀 TCP Server listening on port {PORT}")
 
     while True:
 
         conn, addr = server.accept()
 
-        thread = threading.Thread(
+        client_thread = threading.Thread(
             target=handle_device,
-            args=(conn, addr)
+            args=(conn, addr),
+            daemon=True
         )
 
-        thread.daemon = True
-
-        thread.start()
+        client_thread.start()
 
 
 if __name__ == "__main__":
