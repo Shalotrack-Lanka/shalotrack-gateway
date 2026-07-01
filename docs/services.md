@@ -1,5 +1,7 @@
 # Services
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 The `services/` directory contains the business logic layer — everything above raw database queries and below the TCP server. Each service is a plain Python module (no classes, except where noted). This document covers every file in the directory.
 
 ---

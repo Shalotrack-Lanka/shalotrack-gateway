@@ -1,5 +1,7 @@
 # Protocol Specification
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 The gateway speaks the GT06/V5 binary tracker protocol. Packets arrive in one of two frame formats:
 
 | Frame | Start bytes | Protocol byte offset | Notes |

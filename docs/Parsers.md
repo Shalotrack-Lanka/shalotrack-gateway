@@ -1,5 +1,7 @@
 # Parsers
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 The `parsers/` directory is intended to hold one parser module per protocol. In the current codebase, all active parsing logic lives in a single file: `parsers/v5_parser.py`. The other files in the directory are empty stubs.
 
 ---

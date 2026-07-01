@@ -1,5 +1,7 @@
 # Architecture
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 ## Overview
 
 The gateway is a single-process, multi-threaded Python TCP server. There is no async framework, message queue, or external broker — concurrency is handled with one OS thread per device connection, plus one background thread for the interactive command console.

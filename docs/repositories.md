@@ -1,5 +1,7 @@
 # Repositories
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 The `repositories/` directory contains the data access layer — modules responsible solely for reading from and writing to PostgreSQL. Each repository is a class with only `@staticmethod` methods; no instance state.
 
 ---

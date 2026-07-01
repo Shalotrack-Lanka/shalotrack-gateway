@@ -1,5 +1,7 @@
 # Deployment
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 ## Requirements
 
 | Requirement | Version |

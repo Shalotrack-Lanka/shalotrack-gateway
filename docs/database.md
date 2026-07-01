@@ -1,5 +1,7 @@
 # Database
 
+*Author: Suwen Jayathunga — Lead Architect, ShaloTrack Lanka*
+
 The gateway does not own a schema migration system — it connects to an existing PostgreSQL database (presumably managed by the ASP.NET Core API project) via `psycopg2`. This document describes every table the gateway reads from or writes to, inferred directly from the SQL embedded in the codebase. It is not a full ER diagram of the platform database, only the gateway's view of it.
 
 Connection is established per-call via `database.get_db_connection()`, which reads `DATABASE_URL` from the environment (loaded via `python-dotenv`). There is no connection pooling — every repository/service function opens, uses, and closes its own connection.
