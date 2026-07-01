@@ -6,6 +6,10 @@ from services.device_registry import (
 
 from utils.command_builder import (
     build_where,
+    build_status,
+    build_version,
+    build_params,
+    build_imei,
     build_reset,
     build_relay_on,
     build_relay_off,
@@ -42,8 +46,51 @@ def send_where(imei):
     )
     return command
 
+def send_status(imei):
 
-def reboot(imei):
+    command = build_status()
+
+    send_command(
+        imei,
+        command
+    )
+    return command
+
+
+def send_version(imei):
+
+    command = build_version()
+
+    send_command(
+        imei,
+        command
+    )
+    return command
+
+
+def send_params(imei):
+
+    command = build_params()
+
+    send_command(
+        imei,
+        command
+    )
+    return command
+
+
+def send_imei(imei):
+
+    command = build_imei()
+
+    send_command(
+        imei,
+        command
+    )
+    return command
+
+
+def send_reset(imei):
 
     command = build_reset()
 
@@ -54,7 +101,7 @@ def reboot(imei):
     return command
 
 
-def cut_engine(imei):
+def send_relay_off(imei):
 
     command = build_relay_off()
 
@@ -65,7 +112,7 @@ def cut_engine(imei):
     return command
 
 
-def resume_engine(imei):
+def send_relay_on(imei):
 
     command = build_relay_on()
 

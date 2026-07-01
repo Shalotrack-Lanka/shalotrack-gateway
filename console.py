@@ -1,8 +1,12 @@
 from services.command_service import (
     send_where,
-    reboot,
-    cut_engine,
-    resume_engine
+    send_status,
+    send_version,
+    send_params,
+    send_imei,
+    send_reset,
+    send_relay_on,
+    send_relay_off
 )
 
 
@@ -10,6 +14,10 @@ def start_console():
     print("\n===== ShaloTrack Command Console =====")
     print("Commands:")
     print("where <imei>")
+    print("status <imei>")
+    print("version <imei>")
+    print("params <imei>")
+    print("imei <imei>")
     print("reset <imei>")
     print("relay_on <imei>")
     print("relay_off <imei>")
@@ -35,14 +43,26 @@ def start_console():
             if action == "where":
                 send_where(imei)
 
+            elif action == "status":
+                send_status(imei)
+
+            elif action == "version":
+                send_version(imei)
+
+            elif action == "params":
+                send_params(imei)
+
+            elif action == "imei":
+                send_imei(imei)
+
             elif action == "reset":
-                reboot(imei)
+                send_reset(imei)
 
             elif action == "relay_on":
-                resume_engine(imei)
+                send_relay_on(imei)
 
             elif action == "relay_off":
-                cut_engine(imei)
+                send_relay_off(imei)
 
             else:
                 print("Unknown command")
