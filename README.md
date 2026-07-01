@@ -1,5 +1,7 @@
 # ShaloTrack Gateway
 
+*Lead Architect & Platform Engineer: Suwen Jayathunga — ShaloTrack Lanka*
+
 A Python TCP gateway that receives, parses, and acknowledges packets from GT06/V5-protocol GPS trackers, persists them to PostgreSQL, and exposes a console for sending remote commands back to connected devices.
 
 This service sits between physical GPS trackers (installed in vehicles) and the rest of the ShaloTrack platform (API, database, mobile app):
