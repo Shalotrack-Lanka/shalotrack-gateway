@@ -118,6 +118,39 @@ def process_packet(data, conn, addr):
             else:
                 log(f"✅ Existing Device")
 
+                register_device(
+                    login["imei"],
+                    addr[0],
+                    device_id,
+                    conn
+                )
+
+                log(f"📱 Device registered: {login['imei']}")
+
+                _save_raw(
+                    device_id, 
+                    protocol, 
+                    hex_data
+                )
+
+                log(f"📱 IMEI: {login['imei']}")
+                log(f"🆔 Device ID: {device_id}")
+                log(f"🔢 Serial: {login['serial']}")
+
+                vehicle_id = DeviceRepository.get_vehicle_by_device(
+                    device_id
+                )
+
+                create_event(
+                    device_id=device_id,
+                    vehicle_id=vehicle_id,
+                    event_type=EventType.DEVICE_ONLINE.value,
+                    severity=Severity.LOW,
+                    description="Device connected to the gateway"
+                )
+
+                current_imei = login["imei"]
+
         except Exception as ex:
 
             log(f"❌ LOGIN ERROR: {ex}")
