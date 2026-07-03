@@ -3,6 +3,21 @@ from datetime import datetime
 connected_devices = {}
 
 
+def register_device(
+    imei,
+    ip,
+    device_id,
+    conn
+):
+    connected_devices[imei] = {
+        "device_id": device_id,
+        "ip": ip,
+        "socket": conn,
+        "connected_at": datetime.utcnow(),
+        "last_seen": datetime.utcnow()
+    }
+
+
 def get_imei_by_socket(conn):
 
     print(f"LOOKUP SOCKET: {id(conn)}")
@@ -10,15 +25,6 @@ def get_imei_by_socket(conn):
     for imei, device in connected_devices.items():
 
         print(f"REGISTERED SOCKET: {id(device['socket'])} -> {imei}")
-
-        if device["socket"] == conn:
-            return imei
-
-    return None
-
-def get_imei_by_socket(conn):
-
-    for imei, device in connected_devices.items():
 
         if device["socket"] == conn:
             return imei
