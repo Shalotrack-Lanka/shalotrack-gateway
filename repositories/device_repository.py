@@ -29,54 +29,52 @@ class DeviceRepository:
 
         return None
 
-
     @staticmethod
-def register_device(imei: str) -> str:
+    def register_device(imei: str) -> str:
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-    device_id = str(uuid.uuid4())
+        device_id = str(uuid.uuid4())
 
-    cursor.execute(
-        """
-        INSERT INTO "GpsDevices"
-        (
-            "DeviceId",
-            "ImeiNumber",
-            "DeviceModel",
-            "ProtocolType",
-            "ActivationStatus",
-            "CreatedAt",
-            "UpdatedAt"
+        cursor.execute(
+            """
+            INSERT INTO "GpsDevices"
+            (
+                "DeviceId",
+                "ImeiNumber",
+                "DeviceModel",
+                "ProtocolType",
+                "ActivationStatus",
+                "CreatedAt",
+                "UpdatedAt"
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                NOW(),
+                NOW()
+            )
+            """,
+            (
+                device_id,
+                imei,
+                "V5",
+                "GT06",
+                1
+            )
         )
-        VALUES
-        (
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            NOW(),
-            NOW()
-        )
-        """,
-        (
-            device_id,
-            imei,
-            "V5",
-            "GT06",
-            1
-        )
-    )
 
-    conn.commit()
+        conn.commit()
 
-    cursor.close()
-    conn.close()
+        cursor.close()
+        conn.close()
 
-    return device_id
-
+        return device_id
 
     @staticmethod
     def get_vehicle_by_device(device_id: str) -> str | None:
@@ -104,7 +102,6 @@ def register_device(imei: str) -> str:
             return str(result[0])
 
         return None
-
 
     @staticmethod
     def get_device_status(device_id: str):
