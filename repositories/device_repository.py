@@ -1,4 +1,6 @@
 from database import get_db_connection
+import uuid
+
 
 class DeviceRepository:
     @staticmethod
@@ -27,6 +29,46 @@ class DeviceRepository:
 
         return None
 
+
+    @staticmethod
+    def register_device(imei: str) -> str:
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        device_id = str(uuid.uuid4())
+
+        cursor.execute(
+            """
+            INSERT INTO "GpsDevices"
+            (
+                "DeviceId",
+                "ImeiNumber",
+                "CreatedAt",
+                "UpdatedAt"
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                NOW(),
+                NOW()
+            )
+            """,
+            (
+                device_id,
+                imei
+            )
+        )
+
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return device_id
+
+
     @staticmethod
     def get_vehicle_by_device(device_id: str) -> str | None:
 
@@ -53,6 +95,7 @@ class DeviceRepository:
             return str(result[0])
 
         return None
+
 
     @staticmethod
     def get_device_status(device_id: str):
