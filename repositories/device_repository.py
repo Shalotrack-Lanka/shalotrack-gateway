@@ -31,42 +31,51 @@ class DeviceRepository:
 
 
     @staticmethod
-    def register_device(imei: str) -> str:
+def register_device(imei: str) -> str:
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
-        device_id = str(uuid.uuid4())
+    device_id = str(uuid.uuid4())
 
-        cursor.execute(
-            """
-            INSERT INTO "GpsDevices"
-            (
-                "DeviceId",
-                "ImeiNumber",
-                "CreatedAt",
-                "UpdatedAt"
-            )
-            VALUES
-            (
-                %s,
-                %s,
-                NOW(),
-                NOW()
-            )
-            """,
-            (
-                device_id,
-                imei
-            )
+    cursor.execute(
+        """
+        INSERT INTO "GpsDevices"
+        (
+            "DeviceId",
+            "ImeiNumber",
+            "DeviceModel",
+            "ProtocolType",
+            "ActivationStatus",
+            "CreatedAt",
+            "UpdatedAt"
         )
+        VALUES
+        (
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            NOW(),
+            NOW()
+        )
+        """,
+        (
+            device_id,
+            imei,
+            "V5",
+            "GT06",
+            1
+        )
+    )
 
-        conn.commit()
+    conn.commit()
 
-        cursor.close()
-        conn.close()
+    cursor.close()
+    conn.close()
 
-        return device_id
+    return device_id
 
 
     @staticmethod
