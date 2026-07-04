@@ -4,7 +4,7 @@
 
 The `models/` directory contains Python dataclasses that represent domain objects. These provide typed, self-documenting structures for passing data between layers. They are defined using `@dataclass(slots=True)` for memory efficiency.
 
-Currently, most active code paths pass data as plain dicts rather than dataclass instances — the models represent a planned refactor direction rather than the current runtime behavior. The one exception is `DeviceStatus`, which is used by `StatusRepository` (itself unused) and `state_change._service.py` (also unused).
+Currently, most active code paths pass data as plain dicts rather than dataclass instances — the models represent a planned refactor direction rather than the current runtime behavior. The one exception is `DeviceStatus`, which is used by `StatusRepository` (itself unused) and `state_change_service.py` (also unused).
 
 ---
 
@@ -24,7 +24,7 @@ class DeviceStatus:
     last_seen: datetime | None = None
 ```
 
-Used by `repositories/status_repository.py` and `services/state_change._service.py` — both currently dead code.
+Used by `repositories/status_repository.py` and `services/state_change_service.py` — both currently dead code.
 
 ---
 

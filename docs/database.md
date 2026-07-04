@@ -85,7 +85,7 @@ Connection is established per-call via `database.get_db_connection()`, which rea
 | `PowerStatus` | `1` if not power-cut, `2` if power-cut (derived from terminal info bit `0x80`) |
 | `UpdatedAt` | `NOW()` |
 
-> Two unused duplicate read/write implementations for this table exist in the codebase: `repositories/status_repository.py::StatusRepository` and `services/state_change._service.py::StatusRepository`. Both are fully-formed but never imported by anything else — `tracking_service.py`'s plain functions are the ones actually used.
+> Two unused duplicate read/write implementations for this table exist in the codebase: `repositories/status_repository.py::StatusRepository` and `services/state_change_service.py::StatusRepository`. Both are fully-formed but never imported by anything else — `tracking_service.py`'s plain functions are the ones actually used.
 
 ---
 

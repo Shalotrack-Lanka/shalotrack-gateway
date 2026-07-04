@@ -151,8 +151,8 @@ The logic it describes is well-structured and largely correct in intent — it r
 
 ---
 
-## `services/state_change._service.py`
+## `services/state_change_service.py`
 
-> Note: the filename contains a literal dot before `_service` (`state_change._service.py`), which is unusual and may be a typo.
+> Note: the filename contains a literal dot before `_service` (`state_change_service.py`), which is unusual and may be a typo.
 
 **Current state: dead code.** Contains a `StatusRepository` class that duplicates the one in `repositories/status_repository.py`. Neither is imported anywhere — `services/tracking_service.py`'s plain functions handle all status reads and writes.
