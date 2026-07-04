@@ -1,3 +1,5 @@
+import sys
+import time
 from services.command_service import (
     send_where,
     send_status,
@@ -12,6 +14,19 @@ from services.command_service import (
 
 def start_console():
     print("\n===== ShaloTrack Command Console =====")
+    
+    like a detached Docker container
+    if not sys.stdin.isatty():
+        print("Headless/Detached environment detected. Console input disabled.")
+        print("Keeping the main thread alive cleanly without blocking...")
+        try:
+            while True:
+                time.sleep(3600)  # Sleep cleanly for 1 hour, repeat indefinitely
+        except (KeyboardInterrupt, SystemExit):
+            print("Shutting down gateway background process...")
+        return
+
+    # Keep interactive terminal flow completely intact for local testing
     print("Commands:")
     print("where <imei>")
     print("status <imei>")
@@ -68,5 +83,4 @@ def start_console():
                 print("Unknown command")
 
         except Exception as ex:
-
             print(ex)
