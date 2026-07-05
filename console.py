@@ -11,22 +11,18 @@ from services.command_service import (
     send_relay_off
 )
 
-
 def start_console():
     print("\n===== ShaloTrack Command Console =====")
     
-    like a detached Docker container
     if not sys.stdin.isatty():
-        print("Headless/Detached environment detected. Console input disabled.")
-        print("Keeping the main thread alive cleanly without blocking...")
+        print("Headless environment detected. Console input disabled.")
         try:
             while True:
-                time.sleep(3600)  # Sleep cleanly for 1 hour, repeat indefinitely
+                time.sleep(3600)
         except (KeyboardInterrupt, SystemExit):
             print("Shutting down gateway background process...")
         return
 
-    # Keep interactive terminal flow completely intact for local testing
     print("Commands:")
     print("where <imei>")
     print("status <imei>")
@@ -57,28 +53,20 @@ def start_console():
 
             if action == "where":
                 send_where(imei)
-
             elif action == "status":
                 send_status(imei)
-
             elif action == "version":
                 send_version(imei)
-
             elif action == "params":
                 send_params(imei)
-
             elif action == "imei":
                 send_imei(imei)
-
             elif action == "reset":
                 send_reset(imei)
-
             elif action == "relay_on":
                 send_relay_on(imei)
-
             elif action == "relay_off":
                 send_relay_off(imei)
-
             else:
                 print("Unknown command")
 
