@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 connected_devices = {}
 
@@ -13,8 +13,8 @@ def register_device(
         "device_id": device_id,
         "ip": ip,
         "socket": conn,
-        "connected_at": datetime.utcnow(),
-        "last_seen": datetime.utcnow()
+        "connected_at": datetime.now(timezone.utc),
+        "last_seen": datetime.now(timezone.utc)
     }
 
 
@@ -45,7 +45,7 @@ def update_last_seen(imei):
     device = connected_devices.get(imei)
 
     if device:
-        device["last_seen"] = datetime.utcnow()
+        device["last_seen"] = datetime.now(timezone.utc)
 
 
 def get_socket(imei):

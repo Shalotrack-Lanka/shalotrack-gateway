@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from database import get_db_connection
 from models.device_status import DeviceStatus
 
@@ -55,7 +55,7 @@ class StatusRepository:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         cursor.execute(
             """
@@ -118,7 +118,7 @@ class StatusRepository:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         cursor.execute(
             """
@@ -151,7 +151,7 @@ class StatusRepository:
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         cursor.execute(
             """

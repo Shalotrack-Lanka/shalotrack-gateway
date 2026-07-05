@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from database import get_db_connection
 
 class RawPacketRepository:
@@ -39,7 +39,7 @@ class RawPacketRepository:
                 protocol_number,
                 raw_hex,
                 len(raw_hex) // 2,
-                datetime.utcnow(),
+                datetime.now(timezone.utc),
                 parsed
             )
         )

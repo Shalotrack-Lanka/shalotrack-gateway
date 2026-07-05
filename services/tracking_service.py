@@ -1,6 +1,6 @@
 # Import database connection helper and datetime for timestamps
 from database import get_db_connection
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # Saves GPS tracking data to the GpsTrackings database table
@@ -148,7 +148,7 @@ def update_device_status(
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    now=datetime.utcnow()
+    now=datetime.now(timezone.utc)
 
     cursor.execute(
         """
@@ -207,7 +207,7 @@ def update_device_status(
 def update_heartbeat(device_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     cursor.execute(
         """
@@ -235,7 +235,7 @@ def update_heartbeat(device_id):
 def set_device_offline(device_id):
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     cursor.execute(
         """
@@ -265,7 +265,7 @@ def update_last_seen(device_id):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     cursor.execute(
         """
@@ -297,7 +297,7 @@ def set_device_online(device_id):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     cursor.execute(
         """

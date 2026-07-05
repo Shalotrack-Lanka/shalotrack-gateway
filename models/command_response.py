@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -10,4 +10,4 @@ class CommandResponse:
     raw_response: str
     parsed_data: dict[str, Any]
 
-    received_at: datetime = field(default_factory=datetime.utcnow)
+    received_at: datetime = field(default_factory=datetime.now(timezone.utc))

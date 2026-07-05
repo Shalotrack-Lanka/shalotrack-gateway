@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from database import get_db_connection
 
@@ -55,7 +55,7 @@ def create_event(
             raw_packet_id,
             description,
             json.dumps(metadata) if metadata else None,
-            datetime.utcnow()
+            datetime.now(timezone.utc)
         )
     )
 
