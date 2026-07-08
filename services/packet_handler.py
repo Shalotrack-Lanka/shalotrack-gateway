@@ -200,8 +200,11 @@ def process_packet(data, conn, addr):
                         speed=location["speed"],
                         event_time=location["timestamp"]
                     )
+                    
+                    log("✅ Current Location Updated")
 
-                log("✅ Current Location Updated")
+                else:
+                    log("ℹ️ Device not assigned to a vehicle. Skipping CurrentLocation update.")
 
                 current_imei = connection_imei
 
