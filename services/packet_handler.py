@@ -115,6 +115,46 @@ def process_packet(data, conn, addr):
 
                 log(f"📱 Device Auto registered: {login['imei']}")
 
+                # FIX: this branch was missing the session-registry mapping that
+                # every other packet type (location, status, heartbeat, alarm)
+                # depends on to resolve which device sent data via
+                # get_imei_by_socket(conn). Without it, every packet sent on a
+                # brand-new device's first-ever connection was silently dropped
+                # ("Unknown Device") until the device disconnected and
+                # reconnected -- at which point the DB record already existed
+                # and the "else" branch below (which always worked correctly)
+                # took over. This mirrors that branch's existing, correct logic.
+                register_device(
+                    login["imei"],
+                    addr[0],
+                    device_id,
+                    conn
+                )
+
+                _save_raw(
+                    device_id,
+                    protocol,
+                    hex_data
+                )
+
+                log(f"📱 IMEI: {login['imei']}")
+                log(f"🆔 Device ID: {device_id}")
+                log(f"🔢 Serial: {login['serial']}")
+
+                vehicle_id = DeviceRepository.get_vehicle_by_device(
+                    device_id
+                )
+
+                create_event(
+                    device_id=device_id,
+                    vehicle_id=vehicle_id,
+                    event_type=EventType.DEVICE_ONLINE.value,
+                    severity=Severity.LOW,
+                    description="Device connected to the gateway (first-time registration)"
+                )
+
+                current_imei = login["imei"]
+
             else:
                 log(f"✅ Existing Device")
 

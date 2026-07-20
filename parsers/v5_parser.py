@@ -82,14 +82,18 @@ def parse_location_packet(raw):
     course_status = int.from_bytes(raw[20:22], "big")
 
     heading = course_status & 0x03FF
-    is_south = bool(course_status & 0x0400)
+    # FIX: per the protocol spec's own worked example ("BYTE_1 Bit2 = 1 (North
+    # Latitude)"), this bit set means NORTH, not south -- the original code had
+    # this backwards. Longitude's bit was already correct (spec: "BYTE_1 Bit3 = 0
+    # (East Longitude)", so bit set correctly means West).
+    is_north = bool(course_status & 0x0400)
     is_west = bool(course_status & 0x0800)
     gps_fixed = bool(course_status & 0x1000)
 
-    #if is_south:
-    #    latitude = -latitude
-    #if is_west:
-    #    longitude = -longitude
+    if not is_north:
+        latitude = -latitude
+    if is_west:
+        longitude = -longitude
 
     return {
         "latitude": latitude,
@@ -202,14 +206,18 @@ def parse_alarm_packet(packet):
     course_status = int.from_bytes(packet[20:22], "big")
 
     heading = course_status & 0x03FF
-    is_south = bool(course_status & 0x0400)
+    # FIX: per the protocol spec's own worked example ("BYTE_1 Bit2 = 1 (North
+    # Latitude)"), this bit set means NORTH, not south -- the original code had
+    # this backwards. Longitude's bit was already correct (spec: "BYTE_1 Bit3 = 0
+    # (East Longitude)", so bit set correctly means West).
+    is_north = bool(course_status & 0x0400)
     is_west = bool(course_status & 0x0800)
     gps_fixed = bool(course_status & 0x1000)
 
-    #if is_south:
-    #    latitude = -latitude
-    #if is_west:
-    #    longitude = -longitude
+    if not is_north:
+        latitude = -latitude
+    if is_west:
+        longitude = -longitude
 
     # --------------------------
     # LBS
