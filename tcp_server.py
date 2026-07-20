@@ -1,6 +1,7 @@
 import socket
 import os
 import threading
+import telemetry
 
 from services.packet_handler import process_packet
 from services.device_registry import (
@@ -26,6 +27,8 @@ PORT = int(os.environ.get("PORT", 9000))
 def handle_device(conn, addr):
 
     log(f"✅ Device connected: {addr}")
+
+    telemetry.record_connection_opened()
 
     imei = None
     buffer = b""
@@ -87,6 +90,8 @@ def handle_device(conn, addr):
 
         conn.close()
 
+        telemetry.record_connection_closed()
+
         log("🔌 Device disconnected")
 
 
@@ -111,6 +116,8 @@ def start_server():
     )
 
     server.listen(5)
+
+    telemetry.init_telemetry()
 
     ##testing commands
     threading.Thread(
