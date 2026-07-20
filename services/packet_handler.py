@@ -4,6 +4,7 @@ from parsers.v5_parser import (
     parse_status_packet,
     parse_heartbeat_packet,
     parse_alarm_packet,
+    parse_information_packet,
     get_alarm_name,
     build_ack
 )
@@ -362,6 +363,22 @@ def process_packet(data, conn, addr):
             if device:
 
                 _save_raw(device["device_id"], protocol, hex_data)
+
+                # FIX: this branch previously only saved the raw hex bytes --
+                # parse_information_packet() already existed in v5_parser.py but
+                # was never called anywhere, so its decoded content was silently
+                # discarded. Logging it now (not yet persisting to a table) so we
+                # can see real decoded examples before deciding where this data
+                # actually belongs -- it may overlap with the existing command
+                # response handling (protocol 0x21) or need its own path.
+                info = parse_information_packet(raw)
+
+                if info["is_ascii"]:
+                    log(f"ℹ️ Information (text): {info['text']}")
+                    if info["values"]:
+                        log(f"ℹ️ Information (parsed values): {info['values']}")
+                else:
+                    log(f"ℹ️ Information (non-ASCII payload): {info['raw_hex']}")
 
                 log("✅ Information Packet Saved")
 
