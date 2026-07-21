@@ -82,6 +82,23 @@ def update_current_location(
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # FIX: IgnitionStatus was previously hardcoded to False on every write, and
+    # was missing from the ON CONFLICT DO UPDATE clause entirely -- meaning it
+    # could never reflect the real ignition state, ever, once a device's row
+    # existed. Location packets (protocol 12/22) don't carry ignition data
+    # themselves (that comes from Status/Heartbeat packets, protocol 13/23), so
+    # we look up the device's latest known ignition state from DeviceStatuses --
+    # which IS correctly updated by update_device_status() below -- and use that
+    # real value here instead. Costs one extra SELECT per location update.
+    cursor.execute(
+        """
+        SELECT "IgnitionStatus" FROM "DeviceStatuses" WHERE "DeviceId" = %s
+        """,
+        (device_id,)
+    )
+    row = cursor.fetchone()
+    ignition_status = row[0] if row else False
+
     cursor.execute(
         """
         INSERT INTO "CurrentLocations"
@@ -115,7 +132,8 @@ def update_current_location(
             "Longitude" = EXCLUDED."Longitude",
             "Speed" = EXCLUDED."Speed",
             "LastUpdate" = EXCLUDED."LastUpdate",
-            "MovementStatus" = EXCLUDED."MovementStatus"
+            "MovementStatus" = EXCLUDED."MovementStatus",
+            "IgnitionStatus" = EXCLUDED."IgnitionStatus"
         """,
         (
             device_id,
@@ -124,7 +142,7 @@ def update_current_location(
             longitude,
             speed,
             0,
-            False,
+            ignition_status,
             speed > 0,
             event_time
         )
@@ -324,5 +342,3 @@ def set_device_online(device_id):
 
     cursor.close()
     conn.close()
-
-
