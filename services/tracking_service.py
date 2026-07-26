@@ -9,12 +9,16 @@ from datetime import datetime, timezone
 #   latitude: latitude coordinate of the device's location
 #   longitude: longitude coordinate of the device's location
 #   speed: speed of the device at the time of tracking
+#   heading: direction of travel in degrees (0-359), from the parsed packet
+#   satellites: number of GPS satellites in view, from the parsed packet
 #   event_time: timestamp of when the tracking event occurred
 def save_tracking(
     device_id,
     latitude,
     longitude,
     speed,
+    heading,
+    satellites,
     event_time
 ):
 
@@ -56,8 +60,8 @@ def save_tracking(
             longitude,
             None,
             speed,
-            0,
-            0,
+            heading,
+            satellites,
             None,
             event_time
         )
@@ -76,6 +80,7 @@ def update_current_location(
     latitude,
     longitude,
     speed,
+    heading,
     event_time
 ):
 
@@ -131,6 +136,7 @@ def update_current_location(
             "Latitude" = EXCLUDED."Latitude",
             "Longitude" = EXCLUDED."Longitude",
             "Speed" = EXCLUDED."Speed",
+            "Heading" = EXCLUDED."Heading",
             "LastUpdate" = EXCLUDED."LastUpdate",
             "MovementStatus" = EXCLUDED."MovementStatus",
             "IgnitionStatus" = EXCLUDED."IgnitionStatus"
@@ -141,7 +147,7 @@ def update_current_location(
             latitude,
             longitude,
             speed,
-            0,
+            heading,
             ignition_status,
             speed > 0,
             event_time

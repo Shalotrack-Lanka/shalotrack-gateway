@@ -224,6 +224,8 @@ def process_packet(data, conn, addr):
                     latitude=location["latitude"],
                     longitude=location["longitude"],
                     speed=location["speed"],
+                    heading=location["heading"],
+                    satellites=location["satellites"],
                     event_time=location["timestamp"]
                 )
 
@@ -239,6 +241,7 @@ def process_packet(data, conn, addr):
                         latitude=location["latitude"],
                         longitude=location["longitude"],
                         speed=location["speed"],
+                        heading=location["heading"],
                         event_time=location["timestamp"]
                     )
                     
