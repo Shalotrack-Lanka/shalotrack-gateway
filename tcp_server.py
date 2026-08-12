@@ -1,7 +1,9 @@
 import socket
 import os
 import threading
-import telemetry
+
+# Import the global telemetry instance we created
+from telemetry import telemetry as tel
 
 from services.packet_handler import process_packet
 from services.device_registry import (
@@ -15,109 +17,65 @@ from services.tracking_service import (
 )
 
 from utils.logger import log
-
 from console import start_console
-
 from utils.packet_buffer import extract_packets
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
 
-
 def handle_device(conn, addr):
-
     log(f"✅ Device connected: {addr}")
-
-    telemetry.record_connection_opened()
+    
+    # Increment Active Connections Metric
+    tel.active_connections.add(1)
 
     imei = None
     buffer = b""
 
     try:
-
         conn.settimeout(60)
-
         while True:
-
             data = conn.recv(4096)
-
             if not data:
                 break
 
             buffer += data
-
             packets, buffer = extract_packets(buffer)
 
             for packet in packets:
-
                 log(f"RAW DATA: {packet.hex()}")
-
-                packet_imei = process_packet(
-                    packet,
-                    conn,
-                    addr
-                )
+                packet_imei = process_packet(packet, conn, addr)
 
                 if packet_imei:
                     imei = packet_imei
                     update_last_seen(imei)
 
     except socket.timeout:
-
         log("⏱ Connection timeout")
 
     except Exception as ex:
-
         log(f"❌ Device error: {ex}")
 
     finally:
-
         if imei:
-
             device = get_device(imei)
-
             if device:
-
-                set_device_offline(
-                    device["device_id"]
-                )
-
-                unregister_device(
-                    imei
-                )
-
+                set_device_offline(device["device_id"])
+                unregister_device(imei)
                 log("📴 Device marked Offline")
 
         conn.close()
-
-        telemetry.record_connection_closed()
-
+        
+        # Decrement Active Connections Metric on disconnect
+        tel.active_connections.add(-1)
         log("🔌 Device disconnected")
 
 
 def start_server():
-
-    server = socket.socket(
-        socket.AF_INET,
-        socket.SOCK_STREAM
-    )
-
-    server.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_REUSEADDR,
-        1
-    )
-
-    server.bind(
-        (
-            HOST,
-            PORT
-        )
-    )
-
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
     server.listen(5)
-
-    telemetry.init_telemetry()
 
     ##testing commands
     threading.Thread(
@@ -128,18 +86,13 @@ def start_server():
     log(f"🚀 TCP Server listening on port {PORT}")
 
     while True:
-
         conn, addr = server.accept()
-
         client_thread = threading.Thread(
             target=handle_device,
             args=(conn, addr),
             daemon=True
         )
-
         client_thread.start()
 
-
 if __name__ == "__main__":
-
     start_server()
