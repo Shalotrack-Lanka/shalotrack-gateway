@@ -2,20 +2,15 @@ import socket
 import os
 import threading
 
-# Import the global telemetry instance we created
 from telemetry import telemetry as tel
-
+from config import CONNECTION_TIMEOUT
 from services.packet_handler import process_packet
 from services.device_registry import (
     get_device,
     unregister_device,
     update_last_seen
 )
-
-from services.tracking_service import (
-    set_device_offline
-)
-
+from services.tracking_service import set_device_offline
 from utils.logger import log
 from console import start_console
 from utils.packet_buffer import extract_packets
@@ -23,17 +18,25 @@ from utils.packet_buffer import extract_packets
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
 
+MAX_CONNECTIONS = int(os.environ.get("MAX_CONNECTIONS", 500))
+_connection_semaphore = threading.Semaphore(MAX_CONNECTIONS)
+
+
 def handle_device(conn, addr):
+    if not _connection_semaphore.acquire(blocking=False):
+        log(f"⚠️ Connection cap ({MAX_CONNECTIONS}) reached — rejecting {addr}")
+        conn.close()
+        return
+
     log(f"✅ Device connected: {addr}")
-    
-    # Increment Active Connections Metric
     tel.active_connections.add(1)
 
     imei = None
     buffer = b""
 
     try:
-        conn.settimeout(60)
+        conn.settimeout(CONNECTION_TIMEOUT)
+
         while True:
             data = conn.recv(4096)
             if not data:
@@ -51,7 +54,7 @@ def handle_device(conn, addr):
                     update_last_seen(imei)
 
     except socket.timeout:
-        log("⏱ Connection timeout")
+        log(f"⏱ Connection timeout after {CONNECTION_TIMEOUT}s — {addr}")
 
     except Exception as ex:
         log(f"❌ Device error: {ex}")
@@ -65,9 +68,8 @@ def handle_device(conn, addr):
                 log("📴 Device marked Offline")
 
         conn.close()
-        
-        # Decrement Active Connections Metric on disconnect
         tel.active_connections.add(-1)
+        _connection_semaphore.release()
         log("🔌 Device disconnected")
 
 
@@ -75,15 +77,13 @@ def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((HOST, PORT))
-    server.listen(5)
+    server.listen(512)
 
-    ##testing commands
-    threading.Thread(
-        target=start_console,
-        daemon=True
-    ).start()
+    threading.Thread(target=start_console, daemon=True).start()
 
     log(f"🚀 TCP Server listening on port {PORT}")
+    log(f"⚙️  Connection timeout : {CONNECTION_TIMEOUT}s")
+    log(f"⚙️  Max connections    : {MAX_CONNECTIONS}")
 
     while True:
         conn, addr = server.accept()
@@ -93,6 +93,7 @@ def start_server():
             daemon=True
         )
         client_thread.start()
+
 
 if __name__ == "__main__":
     start_server()

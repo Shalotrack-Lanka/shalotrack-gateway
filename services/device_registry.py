@@ -1,66 +1,63 @@
+import threading
 from datetime import datetime, timezone
 
-connected_devices = {}
+_by_imei: dict[str, dict] = {}
+_by_socket: dict[int, str] = {}
+_lock = threading.RLock()
 
 
-def register_device(
-    imei,
-    ip,
-    device_id,
-    conn
-):
-    connected_devices[imei] = {
-        "device_id": device_id,
-        "ip": ip,
-        "socket": conn,
-        "connected_at": datetime.now(timezone.utc),
-        "last_seen": datetime.now(timezone.utc)
-    }
+def register_device(imei: str, ip: str, device_id: str, conn) -> None:
+    with _lock:
+        existing = _by_imei.get(imei)
+        if existing:
+            _by_socket.pop(id(existing["socket"]), None)
+
+        entry = {
+            "device_id": device_id,
+            "ip": ip,
+            "socket": conn,
+            "connected_at": datetime.now(timezone.utc),
+            "last_seen": datetime.now(timezone.utc),
+        }
+        _by_imei[imei] = entry
+        _by_socket[id(conn)] = imei
 
 
-def get_imei_by_socket(conn):
-
-    print(f"LOOKUP SOCKET: {id(conn)}")
-
-    for imei, device in connected_devices.items():
-
-        print(f"REGISTERED SOCKET: {id(device['socket'])} -> {imei}")
-
-        if device["socket"] == conn:
-            return imei
-
-    return None
+def unregister_device(imei: str) -> None:
+    with _lock:
+        entry = _by_imei.pop(imei, None)
+        if entry:
+            _by_socket.pop(id(entry["socket"]), None)
 
 
-def get_device(imei):
-    return connected_devices.get(imei)
+def get_imei_by_socket(conn) -> str | None:
+    with _lock:
+        return _by_socket.get(id(conn))
 
 
-def unregister_device(imei):
-    connected_devices.pop(imei, None)
+def get_device(imei: str) -> dict | None:
+    with _lock:
+        return _by_imei.get(imei)
 
 
-def update_last_seen(imei):
-
-    device = connected_devices.get(imei)
-
-    if device:
-        device["last_seen"] = datetime.now(timezone.utc)
-
-
-def get_socket(imei):
-
-    device = connected_devices.get(imei)
-
-    if not device:
-        return None
-
-    return device["socket"]
+def update_last_seen(imei: str) -> None:
+    with _lock:
+        device = _by_imei.get(imei)
+        if device:
+            device["last_seen"] = datetime.now(timezone.utc)
 
 
-def is_online(imei):
-    return imei in connected_devices
+def get_socket(imei: str):
+    with _lock:
+        device = _by_imei.get(imei)
+        return device["socket"] if device else None
 
 
-def get_all_devices():
-    return connected_devices
+def is_online(imei: str) -> bool:
+    with _lock:
+        return imei in _by_imei
+
+
+def get_all_devices() -> dict:
+    with _lock:
+        return dict(_by_imei)
