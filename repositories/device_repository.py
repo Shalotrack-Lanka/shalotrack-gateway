@@ -8,15 +8,12 @@ class DeviceRepository:
     @staticmethod
     def get_device_by_imei(imei: str) -> str | None:
         """
-        Look up a device by IMEI. Three-step process:
+        Three-step allowlist check:
+        1. Already in GpsDevices → return immediately
+        2. In SetupShalotrackDevices with Status='Activated' → auto-create GpsDevices record
+        3. Neither → reject
 
-        1. Check GpsDevices — already registered, return immediately.
-        2. Check SetupShalotrackDevices WHERE Status = 'Activated' only.
-           - 'Not Activated'        → rejected
-           - 'Temporarily Stopped'  → rejected
-           - 'Cancelled'            → rejected
-           - 'Activated'            → auto-create GpsDevices record, return DeviceId
-        3. IMEI not in either table → unknown device, rejected.
+        Every connection is guaranteed to return to the pool via try/finally.
         """
 
         # Step 1 — already in GpsDevices?
@@ -31,6 +28,9 @@ class DeviceRepository:
             cursor.close()
             if result:
                 return str(result[0])
+        except Exception as e:
+            log(f"❌ GpsDevices lookup error for {imei}: {e}")
+            return None
         finally:
             release_db_connection(conn)
 
@@ -49,68 +49,75 @@ class DeviceRepository:
             )
             setup = cursor.fetchone()
             cursor.close()
+        except Exception as e:
+            log(f"❌ SetupShalotrackDevices lookup error for {imei}: {e}")
+            return None
         finally:
             release_db_connection(conn)
 
-        # Not in setup table at all — unknown device
+        # Not in setup table — unknown device
         if not setup:
             log(f"🚫 IMEI {imei} not found in SetupShalotrackDevices — unknown device")
             return None
 
         status = setup[3]
 
-        # In setup table but not activated
+        # Found but not activated
         if status != "Activated":
-            log(f"🚫 IMEI {imei} found in SetupShalotrackDevices but Status = '{status}' — rejected")
+            log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
             return None
 
-        # Step 2b — Status = 'Activated', auto-create GpsDevices record
-        log(f"📋 IMEI {imei} is Activated in SetupShalotrackDevices — auto-registering into GpsDevices")
+        # Step 2b — Activated, auto-create GpsDevices record
+        log(f"📋 IMEI {imei} is Activated — auto-registering into GpsDevices")
         device_id = str(uuid.uuid4())
 
-        with managed_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO "GpsDevices"
-                (
-                    "DeviceId",
-                    "ImeiNumber",
-                    "SimNumber",
-                    "DeviceModel",
-                    "ProtocolType",
-                    "ActivationStatus",
-                    "CreatedAt",
-                    "UpdatedAt"
+        try:
+            with managed_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO "GpsDevices"
+                    (
+                        "DeviceId",
+                        "ImeiNumber",
+                        "SimNumber",
+                        "DeviceModel",
+                        "ProtocolType",
+                        "ActivationStatus",
+                        "CreatedAt",
+                        "UpdatedAt"
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ON CONFLICT ("ImeiNumber") DO NOTHING
+                    """,
+                    (
+                        device_id,
+                        imei,
+                        setup[2],
+                        setup[1] or "V5",
+                        "GT06",
+                        1,
+                    )
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-                ON CONFLICT ("ImeiNumber") DO NOTHING
-                """,
-                (
-                    device_id,
-                    imei,
-                    setup[2],           # SimNumber
-                    setup[1] or "V5",   # DeviceCategory as DeviceModel
-                    "GT06",             # ProtocolType
-                    1,                  # ActivationStatus
+                conn.commit()
+
+                # Re-fetch in case ON CONFLICT DO NOTHING fired
+                cursor.execute(
+                    'SELECT "DeviceId" FROM "GpsDevices" WHERE "ImeiNumber" = %s',
+                    (imei,)
                 )
-            )
-            conn.commit()
+                row = cursor.fetchone()
+                cursor.close()
 
-            # Re-fetch in case ON CONFLICT DO NOTHING fired
-            # (race condition: two threads registering same IMEI simultaneously)
-            cursor.execute(
-                'SELECT "DeviceId" FROM "GpsDevices" WHERE "ImeiNumber" = %s',
-                (imei,)
-            )
-            row = cursor.fetchone()
-            cursor.close()
+            if row:
+                log(f"✅ GpsDevices record created — IMEI: {imei} → DeviceId: {row[0]}")
+                return str(row[0])
 
-        if row:
-            log(f"✅ GpsDevices record created — IMEI: {imei} → DeviceId: {row[0]}")
-            return str(row[0])
+            return None
 
-        return None
+        except Exception as e:
+            log(f"❌ GpsDevices auto-registration error for {imei}: {e}")
+            return None
 
     @staticmethod
     def get_vehicle_by_device(device_id: str) -> str | None:
@@ -128,6 +135,9 @@ class DeviceRepository:
             result = cursor.fetchone()
             cursor.close()
             return str(result[0]) if result else None
+        except Exception as e:
+            log(f"❌ get_vehicle_by_device error: {e}")
+            return None
         finally:
             release_db_connection(conn)
 
@@ -157,5 +167,8 @@ class DeviceRepository:
                 "movement_status": result[4],
                 "power_status": result[5],
             }
+        except Exception as e:
+            log(f"❌ get_device_status error: {e}")
+            return None
         finally:
             release_db_connection(conn)

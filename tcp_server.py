@@ -14,6 +14,7 @@ from services.tracking_service import set_device_offline
 from utils.logger import log
 from console import start_console
 from utils.packet_buffer import extract_packets
+from command_api import start_command_api_thread          # NEW
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
@@ -80,6 +81,7 @@ def start_server():
     server.listen(512)
 
     threading.Thread(target=start_console, daemon=True).start()
+    start_command_api_thread()                            # NEW
 
     log(f"🚀 TCP Server listening on port {PORT}")
     log(f"⚙️  Connection timeout : {CONNECTION_TIMEOUT}s")
