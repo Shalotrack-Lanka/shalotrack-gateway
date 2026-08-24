@@ -27,9 +27,15 @@ from decoders.information_decoder import decode_information
 from utils.logger import log
 
 
-def _get_device(imei):
+def _get_device(imei, conn=None):
     if not imei:
-        log("❌ Unknown Device")
+        # Force close the connection so the device must reconnect and send login
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        log("❌ Unknown Device — connection closed to force re-login")
         return None
     device = get_device(imei)
     if not device:
@@ -130,7 +136,7 @@ def process_packet(data, conn, addr):
                 log(f"Time: {location['timestamp']}")
                 log(f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}")
 
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     _save_raw(device["device_id"], protocol, hex_data)
                     save_tracking(
@@ -170,7 +176,7 @@ def process_packet(data, conn, addr):
         elif protocol == "13":
             log("⚡ Status Packet")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     status = parse_status_packet(raw)
                     _save_raw(device["device_id"], protocol, hex_data)
@@ -200,7 +206,7 @@ def process_packet(data, conn, addr):
         elif protocol == "23":
             log("💓 Heartbeat Packet")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     heartbeat = parse_heartbeat_packet(raw)
                     _save_raw(device["device_id"], protocol, hex_data)
@@ -223,14 +229,11 @@ def process_packet(data, conn, addr):
 
         # ================================================================
         # 0x26 — ALARM
-        # FIX: alarm was parsed and logged but NEVER persisted to DeviceEvents.
-        # Now writes a proper event row for every alarm type so alerts are
-        # queryable from the DB, not just visible in process logs.
         # ================================================================
         elif protocol == "26":
             log("🚨 Alarm Packet")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     alarm = parse_alarm_packet(raw)
                     _save_raw(device["device_id"], protocol, hex_data)
@@ -247,16 +250,13 @@ def process_packet(data, conn, addr):
                     log(f"Power Cut      : {alarm['power_cut']}")
                     log(f"Ignition       : {alarm['ignition_status']}")
 
-                    # Map alarm type to severity
-                    high_severity_alarms = {1, 2, 12, 13}   # SOS, POWER_CUT, TOW, GPS_ANTENNA
+                    high_severity_alarms = {1, 2, 12, 13}
                     severity = (
                         Severity.HIGH if alarm["alarm_type"] in high_severity_alarms
                         else Severity.MEDIUM
                     )
 
                     vehicle_id = DeviceRepository.get_vehicle_by_device(device["device_id"])
-
-                    # Persist to DeviceEvents — now queryable from DB and admin portal
                     create_event(
                         device_id=device["device_id"],
                         vehicle_id=vehicle_id,
@@ -289,16 +289,11 @@ def process_packet(data, conn, addr):
 
         # ================================================================
         # 0x94 — INFORMATION
-        # FIX: packet was saved as raw hex only. Now fully decoded through
-        # decode_information() which wires all 8 sub-decoders (network,
-        # SIM, geofence, GPS config, alarms, upload mode, device settings,
-        # phone numbers). Structured config is logged and stored as metadata
-        # on a DEVICE_INFORMATION event so it's queryable from the DB.
         # ================================================================
         elif protocol == "94":
             log("📡 Information Packet")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     _save_raw(device["device_id"], protocol, hex_data)
                     info = parse_information_packet(raw)
@@ -306,10 +301,8 @@ def process_packet(data, conn, addr):
                     if info["is_ascii"]:
                         log(f"ℹ️ Information (text): {info['text']}")
                         if info["values"]:
-                            # Run the full decoder pipeline
                             decoded = decode_information(info["values"])
                             log(f"ℹ️ Decoded config: {json.dumps(decoded, default=str)}")
-
                             vehicle_id = DeviceRepository.get_vehicle_by_device(device["device_id"])
                             create_event(
                                 device_id=device["device_id"],
@@ -334,18 +327,14 @@ def process_packet(data, conn, addr):
                 log(f"❌ INFO PACKET ERROR: {ex}")
 
         # ================================================================
-        # 0x8a — COMMAND ACKNOWLEDGEMENT
-        # Device is ACKing a command we sent it (protocol-level confirm,
-        # distinct from the human-readable 0x21 text response).
-        # Parsed fields: echoed protocol number + serial from the command.
+        # 0x8a — COMMAND ACK
         # ================================================================
         elif protocol == "8a":
             log("📨 Command ACK Packet")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     _save_raw(device["device_id"], protocol, hex_data)
-                    # 0x8a body: [echoed_protocol (1 byte)] [echoed_serial (2 bytes)]
                     if raw[0:2] == b"\x79\x79":
                         body_start = 5
                     else:
@@ -362,12 +351,11 @@ def process_packet(data, conn, addr):
 
         # ================================================================
         # 0x21 — COMMAND TEXT RESPONSE
-        # Human-readable ASCII response from the device (e.g. WHERE# reply).
         # ================================================================
         elif protocol == "21":
             log("📨 Command Text Response")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     _save_raw(device["device_id"], protocol, hex_data)
                     response = parse_command_response(raw)
@@ -384,15 +372,12 @@ def process_packet(data, conn, addr):
                 log(f"❌ COMMAND RESPONSE ERROR: {ex}")
 
         # ================================================================
-        # 0x6e — CONFIGURATION PACKET
-        # Device sends this on connect carrying its current config state.
-        # Format is identical to 0x94 (ASCII key=value pairs in a binary
-        # frame) — run it through the same parser and decoder pipeline.
+        # 0x6e — CONFIGURATION
         # ================================================================
         elif protocol == "6e":
             log("⚙️ Configuration Packet")
             try:
-                device = _get_device(connection_imei)
+                device = _get_device(connection_imei, conn)
                 if device:
                     _save_raw(device["device_id"], protocol, hex_data)
                     info = parse_information_packet(raw)
@@ -433,6 +418,7 @@ def process_packet(data, conn, addr):
                 pass
 
         # ACK always fires — even for rejected/unknown devices
+        # BUT if we closed the connection above, send will silently fail — that's fine
         try:
             ack = build_ack(raw)
             conn.send(ack)
