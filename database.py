@@ -1,4 +1,5 @@
 import os
+import time
 import threading
 import psycopg2
 from psycopg2 import pool as pg_pool
@@ -10,7 +11,6 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "5"))
 DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "60"))
-
 
 _pool: pg_pool.ThreadedConnectionPool | None = None
 _pool_lock = threading.Lock()
@@ -39,8 +39,24 @@ def _get_pool() -> pg_pool.ThreadedConnectionPool:
     return _pool
 
 
-def get_db_connection() -> psycopg2.extensions.connection:
-    return _get_pool().getconn()
+def get_db_connection(timeout: float = 5.0) -> psycopg2.extensions.connection:
+    """
+    Borrow a connection from the pool.
+    Retries for up to `timeout` seconds if the pool is exhausted,
+    instead of crashing immediately. Handles burst reconnects cleanly.
+    """
+    deadline = time.monotonic() + timeout
+    last_error = None
+
+    while time.monotonic() < deadline:
+        try:
+            return _get_pool().getconn()
+        except pg_pool.PoolError as e:
+            last_error = e
+            time.sleep(0.1)
+
+    log(f"❌ DB pool exhausted after {timeout}s — all {DB_POOL_MAX} connections in use")
+    raise last_error
 
 
 def release_db_connection(conn: psycopg2.extensions.connection) -> None:
