@@ -8,6 +8,9 @@ from utils.logger import log
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "5"))
+DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "60"))
+
 
 _pool: pg_pool.ThreadedConnectionPool | None = None
 _pool_lock = threading.Lock()
@@ -24,15 +27,15 @@ def _get_pool() -> pg_pool.ThreadedConnectionPool:
                         "Check your .env file or SSM parameter."
                     )
                 _pool = pg_pool.ThreadedConnectionPool(
-                    minconn=5,
-                    maxconn=40,
+                    minconn=DB_POOL_MIN,
+                    maxconn=DB_POOL_MAX,
                     dsn=DATABASE_URL,
                     keepalives=1,
                     keepalives_idle=30,
                     keepalives_interval=10,
                     keepalives_count=5,
                 )
-                log("✅ DB connection pool initialised (min=5, max=40)")
+                log(f"✅ DB connection pool initialised (min={DB_POOL_MIN}, max={DB_POOL_MAX})")
     return _pool
 
 
