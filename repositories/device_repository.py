@@ -8,36 +8,31 @@ class DeviceRepository:
     @staticmethod
     def get_device_by_imei(imei: str) -> str | None:
         """
-        Three-step allowlist check:
-        1. Already in GpsDevices → return immediately
-        2. In SetupShalotrackDevices with Status='Activated' → auto-create GpsDevices record
-        3. Neither → reject
+        Single-connection lookup — checks GpsDevices and SetupShalotrackDevices
+        in one borrowed connection to minimise pool pressure during login bursts.
 
-        Every connection is guaranteed to return to the pool via try/finally.
+        Flow:
+        1. Check GpsDevices — already registered, return immediately (1 connection total)
+        2. Check SetupShalotrackDevices WHERE Status = 'Activated' (same connection)
+           - Not found or not Activated → reject
+           - Activated → auto-create GpsDevices record (second connection via managed_connection)
+        3. IMEI not in either table → unknown device, rejected
         """
-
-        # Step 1 — already in GpsDevices?
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+
+            # Step 1 — already in GpsDevices?
             cursor.execute(
                 'SELECT "DeviceId" FROM "GpsDevices" WHERE "ImeiNumber" = %s LIMIT 1',
                 (imei,)
             )
             result = cursor.fetchone()
-            cursor.close()
             if result:
+                cursor.close()
                 return str(result[0])
-        except Exception as e:
-            log(f"❌ GpsDevices lookup error for {imei}: {e}")
-            return None
-        finally:
-            release_db_connection(conn)
 
-        # Step 2 — check SetupShalotrackDevices, Activated only
-        conn = get_db_connection()
-        try:
-            cursor = conn.cursor()
+            # Step 2 — check SetupShalotrackDevices, Activated only
             cursor.execute(
                 """
                 SELECT "ImeiNumber", "DeviceCategory", "SimNumber", "Status"
@@ -49,25 +44,25 @@ class DeviceRepository:
             )
             setup = cursor.fetchone()
             cursor.close()
+
+            if not setup:
+                log(f"🚫 IMEI {imei} not found in SetupShalotrackDevices — unknown device")
+                return None
+
+            status = setup[3]
+            if status != "Activated":
+                log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
+                return None
+
         except Exception as e:
-            log(f"❌ SetupShalotrackDevices lookup error for {imei}: {e}")
+            log(f"❌ Device lookup error for {imei}: {e}")
             return None
         finally:
+            # Always return connection to pool — even if exception occurred
             release_db_connection(conn)
 
-        # Not in setup table — unknown device
-        if not setup:
-            log(f"🚫 IMEI {imei} not found in SetupShalotrackDevices — unknown device")
-            return None
-
-        status = setup[3]
-
-        # Found but not activated
-        if status != "Activated":
-            log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
-            return None
-
-        # Step 2b — Activated, auto-create GpsDevices record
+        # Step 3 — Status = 'Activated', auto-create GpsDevices record
+        # Uses a fresh managed_connection — previous one already returned to pool
         log(f"📋 IMEI {imei} is Activated — auto-registering into GpsDevices")
         device_id = str(uuid.uuid4())
 
@@ -112,7 +107,6 @@ class DeviceRepository:
             if row:
                 log(f"✅ GpsDevices record created — IMEI: {imei} → DeviceId: {row[0]}")
                 return str(row[0])
-
             return None
 
         except Exception as e:
