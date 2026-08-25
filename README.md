@@ -349,17 +349,7 @@ AWS NLB (port 8000) ──► Gateway EC2 (t3.small)
 
 ---
 
-## Contributors
 
-ShaloTrack Group 05 — Lanka Nippon BizTech Institute (LNBTI)
-
-| Role | Contributor |
-|---|---|
-| TCP Gateway, C# API, Android Backend | Suwen Jayathunga (UGC0323020) |
-| Android UI/UX | Nethmi Wijekoon (UGC0323022) |
-| Admin Portal, QA | Nuwan Akalanka (UGC0323027) |
-| Cloud Infrastructure, SRE | Amoda Rashmika (UGC0323017) |
-| Supervisor | Chandana Deshapriya |
 
 **Investor & Owner:** Polwatte Gedara Nuwan Aloka
 
