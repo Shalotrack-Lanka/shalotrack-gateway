@@ -10,4 +10,4 @@ class CommandResponse:
     raw_response: str
     parsed_data: dict[str, Any]
 
-    received_at: datetime = field(default_factory=datetime.now(timezone.utc))
+    received_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
