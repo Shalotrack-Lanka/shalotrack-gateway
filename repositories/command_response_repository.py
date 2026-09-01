@@ -9,6 +9,9 @@ class CommandResponseRepository:
     def save(response: CommandResponse):
         with managed_connection() as conn:
             cursor = conn.cursor()
+            # Strip null bytes — V5 device responses contain 0x00 terminators
+            # which PostgreSQL rejects in text columns
+            raw = response.raw_response.replace('\x00', '') if response.raw_response else ''
             cursor.execute(
                 """
                 INSERT INTO "CommandResponses"
@@ -18,7 +21,7 @@ class CommandResponseRepository:
                 (
                     response.device_id,
                     response.command,
-                    response.raw_response,
+                    raw,
                     json.dumps(response.parsed_data)
                 )
             )
