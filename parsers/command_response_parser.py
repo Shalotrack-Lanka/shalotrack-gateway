@@ -12,10 +12,11 @@ def parse_command_response(packet):
     else:
         payload = packet[4:-6]
 
-    text = payload.decode(
-        "ascii",
-        errors="ignore"
-    ).strip()
+    text = payload.decode("ascii", errors="ignore").strip()
+
+    # Strip control characters (null bytes, SOH, STX etc.)
+    # V5 device prepends \x01\x01 to some responses
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text).strip()
 
     result = {
         "command": "UNKNOWN",
@@ -26,9 +27,11 @@ def parse_command_response(packet):
 
     # ------------------------------------
     # WHERE
+    # Device replies with either:
+    #   "Current position! Lat:..."
+    #   "Last position! Lat:..."
     # ------------------------------------
-
-    if "Current position!" in text:
+    if "position!" in text.lower():
 
         result["command"] = "WHERE"
 
@@ -74,46 +77,40 @@ def parse_command_response(packet):
             "longitude": longitude,
             "course": course,
             "speed": speed,
-            "timestamp": timestamp
+            "timestamp": str(timestamp) if timestamp else None
         }
 
         return result
 
     # ------------------------------------
     # STATUS
+    # Device replies with semicolon-separated key:value pairs
+    # e.g. "Battery:3.9V,NORMAL; GPRS:Link Up; GSM Signal Level:Strong"
     # ------------------------------------
-
-    if "[STATUS]" in text:
+    if "[STATUS]" in text or "Volt:" in text or "GPRS:" in text or "Battery:" in text:
 
         result["command"] = "STATUS"
 
         data = {}
 
-        for line in text.splitlines():
-
-            if ":" not in line:
+        for part in re.split(r'[;\n]', text):
+            part = part.strip()
+            if ":" not in part:
                 continue
-
-            key, value = line.split(":", 1)
-
+            key, _, value = part.partition(":")
             data[key.strip()] = value.strip()
 
         result["data"] = data
-
         return result
 
     # ------------------------------------
     # VERSION
     # ------------------------------------
-
     if "[VERSION]" in text:
 
         result["command"] = "VERSION"
 
-        firmware = text.replace(
-            "[VERSION]",
-            ""
-        ).strip()
+        firmware = text.replace("[VERSION]", "").strip()
 
         result["data"] = {
             "firmware": firmware
@@ -124,7 +121,6 @@ def parse_command_response(packet):
     # ------------------------------------
     # PARAM
     # ------------------------------------
-
     if "[PARAM]" in text:
 
         result["command"] = "PARAM"
@@ -132,16 +128,12 @@ def parse_command_response(packet):
         data = {}
 
         for line in text.splitlines():
-
             if ":" not in line:
                 continue
-
             key, value = line.split(":", 1)
-
             data[key.strip()] = value.strip()
 
         result["data"] = data
-
         return result
 
     return result
