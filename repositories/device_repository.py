@@ -23,13 +23,26 @@ class DeviceRepository:
             cursor = conn.cursor()
 
             # Step 1 — already in GpsDevices?
+            # A device that already has a GpsDevices row is still refused when its
+            # SetupShalotrackDevices row says it is no longer Activated (e.g. a faulty
+            # device that was replaced). No setup row at all (legacy/demo device) keeps
+            # the old behaviour and is allowed.
             cursor.execute(
-                'SELECT "DeviceId" FROM "GpsDevices" WHERE "ImeiNumber" = %s LIMIT 1',
+                '''
+                SELECT g."DeviceId", s."Status"
+                FROM "GpsDevices" g
+                LEFT JOIN "SetupShalotrackDevices" s ON s."ImeiNumber" = g."ImeiNumber"
+                WHERE g."ImeiNumber" = %s
+                LIMIT 1
+                ''',
                 (imei,)
             )
             result = cursor.fetchone()
             if result:
                 cursor.close()
+                if result[1] is not None and result[1] != "Activated":
+                    log(f"🚫 IMEI {imei} Status = '{result[1]}' — rejected (already registered)")
+                    return None
                 return str(result[0])
 
             # Step 2 — check SetupShalotrackDevices, Activated only
