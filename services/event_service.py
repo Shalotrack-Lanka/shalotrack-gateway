@@ -1,9 +1,10 @@
 import json
 from datetime import datetime, timezone
 
-from database import get_db_connection
+from database import managed_connection
 
-def create_event(
+
+async def create_event(
         device_id,
         event_type,
         severity,
@@ -14,42 +15,36 @@ def create_event(
         description=None,
         metadata=None
 ):
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    # asyncpg binds parameters strictly by type — unlike psycopg2, it will
+    # not silently stringify an IntEnum/Enum for a text column. EventType
+    # and Severity are both Enums upstream (Severity is an IntEnum), so
+    # normalise them to plain str here, once, for every caller.
+    event_type_value = event_type.value if hasattr(event_type, "value") else event_type
+    severity_value = str(severity.value) if hasattr(severity, "value") else str(severity)
 
-    cursor.execute(
-        """
-        INSERT INTO "DeviceEvents" (
-            "DeviceId",
-            "VehicleId",
-            "EventType",
-            "Severity",
-            "Latitude",
-            "Longitude",
-            "RawPacketId",
-            "Description",
-            "Metadata",
-            "CreatedAt"
-        ) VALUES 
-        (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                %s
-        )
-        """,
-        (
+    async with managed_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO "DeviceEvents" (
+                "DeviceId",
+                "VehicleId",
+                "EventType",
+                "Severity",
+                "Latitude",
+                "Longitude",
+                "RawPacketId",
+                "Description",
+                "Metadata",
+                "CreatedAt"
+            ) VALUES
+            (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+            )
+            """,
             device_id,
             vehicle_id,
-            event_type,
-            severity,
+            event_type_value,
+            severity_value,
             latitude,
             longitude,
             raw_packet_id,
@@ -57,8 +52,3 @@ def create_event(
             json.dumps(metadata) if metadata else None,
             datetime.now(timezone.utc)
         )
-    )
-
-    conn.commit()
-    cursor.close()
-    conn.close()

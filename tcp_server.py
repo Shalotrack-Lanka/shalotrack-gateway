@@ -1,13 +1,13 @@
-import socket
+import asyncio
 import os
-import threading
 
-from config import CONNECTION_TIMEOUT
+from config import CONNECTION_TIMEOUT, MAX_CONNECTIONS, PROBE_TIMEOUT
+from database import init_pool, close_pool
 from services.packet_handler import process_packet
 from services.device_registry import (
     get_device,
     unregister_device,
-    update_last_seen
+    update_last_seen,
 )
 from services.tracking_service import set_device_offline
 from utils.logger import log
@@ -18,97 +18,87 @@ from command_api import start_command_api_thread
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
 
-MAX_CONNECTIONS = int(os.environ.get("MAX_CONNECTIONS", 500))
-_connection_semaphore = threading.Semaphore(MAX_CONNECTIONS)
-
 # ---------------------------------------------------------------------------
-# NLB health check probe suppression
-#
-# The AWS NLB sends a bare TCP connect every 10 seconds to port 9000 to
-# check gateway health. These probes connect, send no data, and close.
-# They flood the logs with connect/disconnect noise and consume a thread
-# slot for their brief lifetime.
-#
-# The peek-based detection reads the first byte without consuming it.
-# If no data arrives within PROBE_TIMEOUT seconds, it's a probe — close
-# silently. Real GPS devices always send a login packet immediately.
+# Connection cap — asyncio equivalent of the old threading.Semaphore.
+# A plain counter + lock, since asyncio.Semaphore has no non-blocking
+# "try acquire" the way threading.Semaphore does.
 # ---------------------------------------------------------------------------
-PROBE_TIMEOUT = float(os.environ.get("PROBE_TIMEOUT", "1.0"))
-
-# Known NLB probe source IPs (VPC internal) — add more if needed
-_PROBE_IPS = {"10.0.3.173", "10.0.4.173"}
+_connection_count = 0
+_connection_lock = asyncio.Lock()
 
 
-def _is_probe(conn, addr) -> bool:
-    """
-    Detect NLB health check probes before spawning a handler thread.
-    Returns True if the connection sends no data within PROBE_TIMEOUT.
-    """
-    ip = addr[0]
-
-    # Fast path — known probe IPs
-    if ip in _PROBE_IPS:
-        conn.settimeout(PROBE_TIMEOUT)
-        try:
-            data = conn.recv(1, socket.MSG_PEEK)
-            if not data:
-                return True
-        except socket.timeout:
-            return True
-        except Exception:
-            return True
-        return False
-
-    # Unknown IP — peek briefly
-    conn.settimeout(PROBE_TIMEOUT)
-    try:
-        data = conn.recv(1, socket.MSG_PEEK)
-        if not data:
-            return True
-    except socket.timeout:
-        # No data in PROBE_TIMEOUT — treat as probe
-        return True
-    except Exception:
+async def _try_acquire_slot() -> bool:
+    global _connection_count
+    async with _connection_lock:
+        if _connection_count >= MAX_CONNECTIONS:
+            return False
+        _connection_count += 1
         return True
 
-    conn.settimeout(None)  # Reset for real device handling
-    return False
+
+async def _release_slot() -> None:
+    global _connection_count
+    async with _connection_lock:
+        _connection_count -= 1
 
 
-def handle_device(conn, addr):
-    """Handle one GPS device connection for its entire lifetime."""
+async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """
+    Handle one GPS device connection for its entire lifetime.
 
-    if not _connection_semaphore.acquire(blocking=False):
+    NLB health-check probe suppression:
+    The AWS NLB sends a bare TCP connect every 10 seconds to check gateway
+    health. These probes connect, send no data, and close. asyncio streams
+    have no MSG_PEEK equivalent, so detection works by reading with a short
+    timeout: a real device always sends a login packet immediately, a probe
+    sends nothing. Whatever is read this way is the first real data and is
+    fed straight into the packet buffer — nothing is thrown away.
+    """
+    addr = writer.get_extra_info("peername") or ("unknown", 0)
+
+    if not await _try_acquire_slot():
         log(f"⚠️ Connection cap ({MAX_CONNECTIONS}) reached — rejecting {addr}")
-        conn.close()
+        writer.close()
         return
-
-    log(f"✅ Device connected: {addr}")
 
     imei = None
     buffer = b""
 
     try:
-        conn.settimeout(CONNECTION_TIMEOUT)
+        try:
+            data = await asyncio.wait_for(reader.read(4096), timeout=PROBE_TIMEOUT)
+        except asyncio.TimeoutError:
+            return  # probe — no data within PROBE_TIMEOUT
+        if not data:
+            return  # probe — connection closed with no data
+
+        log(f"✅ Device connected: {addr}")
+        buffer = data
 
         while True:
-            data = conn.recv(4096)
-            if not data:
-                break
-
-            buffer += data
             packets, buffer = extract_packets(buffer)
 
             for packet in packets:
                 log(f"RAW DATA: {packet.hex()}")
-                packet_imei = process_packet(packet, conn, addr)
+                packet_imei = await process_packet(packet, writer, addr)
 
                 if packet_imei:
                     imei = packet_imei
                     update_last_seen(imei)
 
-    except socket.timeout:
-        log(f"⏱ Connection timeout after {CONNECTION_TIMEOUT}s — {addr}")
+            try:
+                data = await asyncio.wait_for(reader.read(4096), timeout=CONNECTION_TIMEOUT)
+            except asyncio.TimeoutError:
+                log(f"⏱ Connection timeout after {CONNECTION_TIMEOUT}s — {addr}")
+                break
+
+            if not data:
+                break
+
+            buffer += data
+
+    except (ConnectionResetError, asyncio.IncompleteReadError) as ex:
+        log(f"❌ Device error: {ex}")
 
     except Exception as ex:
         log(f"❌ Device error: {ex}")
@@ -117,44 +107,46 @@ def handle_device(conn, addr):
         if imei:
             device = get_device(imei)
             if device:
-                set_device_offline(device["device_id"])
+                await set_device_offline(device["device_id"])
                 unregister_device(imei)
                 log("📴 Device marked Offline")
 
-        conn.close()
-        _connection_semaphore.release()
-        log("🔌 Device disconnected")
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+        await _release_slot()
+        log(f"🔌 Device disconnected: {addr}")
 
 
-def start_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
-    server.listen(512)
+async def main() -> None:
+    await init_pool()
 
-    threading.Thread(target=start_console, daemon=True).start()
-    start_command_api_thread()
+    loop = asyncio.get_running_loop()
+    start_command_api_thread(loop)
+    loop.run_in_executor(None, start_console, loop)
+
+    # backlog: OS-level queue for connections accepted but not yet handed to
+    # handle_device. The old threading version explicitly called
+    # server.listen(512) -- asyncio.start_server()'s default backlog is only
+    # 100, which drops connections under a reconnect storm (e.g. every
+    # device reconnecting at once after a network blip or gateway restart)
+    # well before MAX_CONNECTIONS ever gets a chance to reject them cleanly.
+    server = await asyncio.start_server(handle_device, HOST, PORT, backlog=2048)
 
     log(f"🚀 TCP Server listening on port {PORT}")
     log(f"⚙️  Connection timeout : {CONNECTION_TIMEOUT}s")
     log(f"⚙️  Max connections    : {MAX_CONNECTIONS}")
     log(f"⚙️  Probe timeout      : {PROBE_TIMEOUT}s")
 
-    while True:
-        conn, addr = server.accept()
-
-        # Silently discard NLB health check probes
-        if _is_probe(conn, addr):
-            conn.close()
-            continue
-
-        client_thread = threading.Thread(
-            target=handle_device,
-            args=(conn, addr),
-            daemon=True
-        )
-        client_thread.start()
+    try:
+        async with server:
+            await server.serve_forever()
+    finally:
+        await close_pool()
 
 
 if __name__ == "__main__":
-    start_server()
+    asyncio.run(main())

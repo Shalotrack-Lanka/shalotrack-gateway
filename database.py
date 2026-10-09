@@ -1,9 +1,5 @@
 import os
-import time
-import threading
-import psycopg2
-from psycopg2 import pool as pg_pool
-from psycopg2 import OperationalError
+import asyncpg
 from dotenv import load_dotenv
 from utils.logger import log
 
@@ -13,143 +9,78 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "5"))
 DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "150"))
 
-_pool: pg_pool.ThreadedConnectionPool | None = None
-_pool_lock = threading.Lock()
+_pool: asyncpg.Pool | None = None
 
 
-def _get_pool() -> pg_pool.ThreadedConnectionPool:
+async def init_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        with _pool_lock:
-            if _pool is None:
-                if not DATABASE_URL:
-                    raise RuntimeError(
-                        "DATABASE_URL environment variable is not set. "
-                        "Check your .env file or SSM parameter."
-                    )
-                _pool = pg_pool.ThreadedConnectionPool(
-                    minconn=DB_POOL_MIN,
-                    maxconn=DB_POOL_MAX,
-                    dsn=DATABASE_URL,
-                    # Keepalives prevent Supabase from silently dropping
-                    # idle connections after ~5 minutes of inactivity
-                    keepalives=1,
-                    keepalives_idle=30,
-                    keepalives_interval=10,
-                    keepalives_count=5,
-                    # Connection timeout — fail fast if Supabase is unreachable
-                    connect_timeout=10,
-                )
-                log(f"✅ DB connection pool initialised (min={DB_POOL_MIN}, max={DB_POOL_MAX})")
+        if not DATABASE_URL:
+            raise RuntimeError(
+                "DATABASE_URL environment variable is not set. "
+                "Check your .env file or SSM parameter."
+            )
+        _pool = await asyncpg.create_pool(
+            dsn=DATABASE_URL,
+            min_size=DB_POOL_MIN,
+            max_size=DB_POOL_MAX,
+            command_timeout=10,
+            max_inactive_connection_lifetime=300,
+            # Required because DATABASE_URL points at Supabase's Supavisor
+            # pooler in TRANSACTION mode (port 6543). Transaction mode
+            # multiplexes every app-side connection across a small shared
+            # pool of real backend Postgres connections (15 on Micro tier) —
+            # a given logical connection can be served by a *different*
+            # backend connection on every transaction. asyncpg's default
+            # server-side prepared-statement cache assumes one backend
+            # connection stays fixed, so with transaction-mode pooling it
+            # will intermittently bind a statement that no longer exists on
+            # whichever backend connection the pooler happens to hand back.
+            # That shows up as sporadic, hard-to-reproduce query failures
+            # under load instead of a clean error — disable it entirely.
+            statement_cache_size=0,
+        )
+        log(f"✅ DB connection pool initialised (min={DB_POOL_MIN}, max={DB_POOL_MAX})")
     return _pool
 
 
-def _validate_connection(conn) -> bool:
-    """
-    Check if a borrowed connection is still alive.
-
-    Supabase's PgBouncer may silently close idle connections. If we hand
-    out a dead connection, the caller gets an error mid-query. This check
-    catches dead connections early and discards them so the pool replaces
-    them with fresh ones.
-
-    Uses a cheap SELECT 1 — fast, no table scan, always succeeds on live conn.
-    """
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        cursor.close()
-        return True
-    except Exception:
-        return False
+def get_pool() -> asyncpg.Pool:
+    if _pool is None:
+        raise RuntimeError("DB pool not initialised — call init_pool() at startup")
+    return _pool
 
 
-def get_db_connection(timeout: float = 5.0) -> psycopg2.extensions.connection:
-    """
-    Borrow a validated connection from the pool.
-
-    Retries for up to `timeout` seconds if:
-    - Pool is exhausted (all slots in use)
-    - Borrowed connection is dead (silently replaced)
-
-    This ensures callers always receive a live, usable connection.
-    """
-    deadline = time.monotonic() + timeout
-    last_error = None
-
-    while time.monotonic() < deadline:
-        try:
-            conn = _get_pool().getconn()
-
-            # Validate the connection before handing it out
-            if not _validate_connection(conn):
-                # Dead connection — discard and let pool create a fresh one
-                try:
-                    _get_pool().putconn(conn, close=True)
-                except Exception:
-                    pass
-                time.sleep(0.1)
-                continue
-
-            return conn
-
-        except pg_pool.PoolError as e:
-            last_error = e
-            time.sleep(0.1)
-        except OperationalError as e:
-            # DB unreachable — wait and retry
-            last_error = e
-            time.sleep(0.5)
-
-    log(f"❌ DB pool exhausted after {timeout}s — all {DB_POOL_MAX} connections in use")
-    raise last_error or Exception("DB pool exhausted")
+async def close_pool() -> None:
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
 
-def release_db_connection(conn: psycopg2.extensions.connection) -> None:
-    """
-    Return a connection to the pool.
-    Always call in a finally block — never let a borrowed connection leak.
-    If the connection is broken, it is discarded and the pool opens a fresh one.
-    """
-    try:
-        # Check if connection is in a bad state
-        if conn.closed or conn.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+async def get_db_connection() -> asyncpg.pool.PoolConnectionProxy:
+    return await get_pool().acquire()
 
-        _get_pool().putconn(conn)
-    except Exception as e:
-        log(f"⚠️ Failed to return connection to pool: {e}")
-        # Try to discard the broken connection
-        try:
-            _get_pool().putconn(conn, close=True)
-        except Exception:
-            pass
+
+async def release_db_connection(conn) -> None:
+    await get_pool().release(conn)
 
 
 class managed_connection:
     """
-    Context manager that guarantees the connection is always returned
-    to the pool, even if an exception is raised mid-query.
+    Async context manager for borrowing a pooled connection:
 
-    Usage:
-        with managed_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(...)
-            conn.commit()
-            cursor.close()
+        async with managed_connection() as conn:
+            await conn.execute(...)
+
+    Always releases back to the pool, even on exception — never call
+    conn.close() directly on a pooled connection, that destroys it
+    instead of returning it and silently shrinks the pool under load.
     """
-    def __enter__(self) -> psycopg2.extensions.connection:
-        self._conn = get_db_connection()
+
+    async def __aenter__(self) -> asyncpg.pool.PoolConnectionProxy:
+        self._conn = await get_pool().acquire()
         return self._conn
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is not None:
-            try:
-                self._conn.rollback()
-            except Exception:
-                pass
-        release_db_connection(self._conn)
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+        await get_pool().release(self._conn)
         return False

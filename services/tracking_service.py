@@ -3,36 +3,31 @@ from datetime import datetime, timezone
 from utils.logger import log
 
 
-def save_tracking(device_id, latitude, longitude, speed, heading, satellites, event_time):
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
+async def save_tracking(device_id, latitude, longitude, speed, heading, satellites, event_time):
+    async with managed_connection() as conn:
+        await conn.execute(
             """
             INSERT INTO "GpsTrackings"
             ("DeviceId","Latitude","Longitude","Altitude","Speed","Heading","Satellites","GpsAccuracy","EventTime","CreatedAt")
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
             """,
-            (device_id, latitude, longitude, None, speed, heading, satellites, None, event_time)
+            device_id, latitude, longitude, None, speed, heading, satellites, None, event_time
         )
-        conn.commit()
-        cursor.close()
 
 
-def update_current_location(device_id, vehicle_id, latitude, longitude, speed, heading, event_time):
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            'SELECT "IgnitionStatus" FROM "DeviceStatuses" WHERE "DeviceId" = %s',
-            (device_id,)
+async def update_current_location(device_id, vehicle_id, latitude, longitude, speed, heading, event_time):
+    async with managed_connection() as conn:
+        ignition_status = await conn.fetchval(
+            'SELECT "IgnitionStatus" FROM "DeviceStatuses" WHERE "DeviceId" = $1',
+            device_id
         )
-        row = cursor.fetchone()
-        ignition_status = row[0] if row else False
+        ignition_status = ignition_status if ignition_status is not None else False
 
-        cursor.execute(
+        await conn.execute(
             """
             INSERT INTO "CurrentLocations"
             ("DeviceId","VehicleId","Latitude","Longitude","Speed","Heading","IgnitionStatus","MovementStatus","LastUpdate")
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT ("DeviceId") DO UPDATE SET
                 "VehicleId"      = EXCLUDED."VehicleId",
                 "Latitude"       = EXCLUDED."Latitude",
@@ -43,21 +38,18 @@ def update_current_location(device_id, vehicle_id, latitude, longitude, speed, h
                 "MovementStatus" = EXCLUDED."MovementStatus",
                 "IgnitionStatus" = EXCLUDED."IgnitionStatus"
             """,
-            (device_id, vehicle_id, latitude, longitude, speed, heading, ignition_status, speed > 0, event_time)
+            device_id, vehicle_id, latitude, longitude, speed, heading, ignition_status, speed > 0, event_time
         )
-        conn.commit()
-        cursor.close()
 
 
-def update_device_status(device_id, battery_level, gps_signal, ignition_status, movement_status, power_status):
+async def update_device_status(device_id, battery_level, gps_signal, ignition_status, movement_status, power_status):
     now = datetime.now(timezone.utc)
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
+    async with managed_connection() as conn:
+        await conn.execute(
             """
             INSERT INTO "DeviceStatuses"
             ("DeviceId","IsOnline","LastHeartbeat","LastSeen","GpsSignal","BatteryLevel","IgnitionStatus","MovementStatus","PowerStatus","UpdatedAt")
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT ("DeviceId") DO UPDATE SET
                 "IsOnline"       = EXCLUDED."IsOnline",
                 "LastHeartbeat"  = EXCLUDED."LastHeartbeat",
@@ -69,59 +61,45 @@ def update_device_status(device_id, battery_level, gps_signal, ignition_status, 
                 "PowerStatus"    = EXCLUDED."PowerStatus",
                 "UpdatedAt"      = EXCLUDED."UpdatedAt"
             """,
-            (device_id, True, now, now, gps_signal, battery_level, ignition_status, movement_status, power_status, now)
+            device_id, True, now, now, gps_signal, battery_level, ignition_status, movement_status, power_status, now
         )
-        conn.commit()
-        cursor.close()
 
 
-def update_heartbeat(device_id):
+async def update_heartbeat(device_id):
     now = datetime.now(timezone.utc)
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
+    async with managed_connection() as conn:
+        await conn.execute(
             """
             UPDATE "DeviceStatuses"
-            SET "IsOnline" = TRUE, "LastHeartbeat" = %s, "LastSeen" = %s, "UpdatedAt" = %s
-            WHERE "DeviceId" = %s
+            SET "IsOnline" = TRUE, "LastHeartbeat" = $1, "LastSeen" = $2, "UpdatedAt" = $3
+            WHERE "DeviceId" = $4
             """,
-            (now, now, now, device_id)
+            now, now, now, device_id
         )
-        conn.commit()
-        cursor.close()
 
 
-def set_device_offline(device_id):
+async def set_device_offline(device_id):
     now = datetime.now(timezone.utc)
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            'UPDATE "DeviceStatuses" SET "IsOnline" = FALSE, "UpdatedAt" = %s WHERE "DeviceId" = %s',
-            (now, device_id)
+    async with managed_connection() as conn:
+        await conn.execute(
+            'UPDATE "DeviceStatuses" SET "IsOnline" = FALSE, "UpdatedAt" = $1 WHERE "DeviceId" = $2',
+            now, device_id
         )
-        conn.commit()
-        cursor.close()
 
 
-def update_last_seen(device_id):
+async def update_last_seen(device_id):
     now = datetime.now(timezone.utc)
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            'UPDATE "DeviceStatuses" SET "LastSeen" = %s, "UpdatedAt" = %s WHERE "DeviceId" = %s',
-            (now, now, device_id)
+    async with managed_connection() as conn:
+        await conn.execute(
+            'UPDATE "DeviceStatuses" SET "LastSeen" = $1, "UpdatedAt" = $2 WHERE "DeviceId" = $3',
+            now, now, device_id
         )
-        conn.commit()
-        cursor.close()
 
 
-def set_device_online(device_id):
+async def set_device_online(device_id):
     now = datetime.now(timezone.utc)
-    with managed_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            'UPDATE "DeviceStatuses" SET "IsOnline" = TRUE, "LastSeen" = %s, "UpdatedAt" = %s WHERE "DeviceId" = %s',
-            (now, now, device_id)
+    async with managed_connection() as conn:
+        await conn.execute(
+            'UPDATE "DeviceStatuses" SET "IsOnline" = TRUE, "LastSeen" = $1, "UpdatedAt" = $2 WHERE "DeviceId" = $3',
+            now, now, device_id
         )
-        conn.commit()
-        cursor.close()

@@ -6,7 +6,7 @@ import uuid
 class DeviceRepository:
 
     @staticmethod
-    def get_device_by_imei(imei: str) -> str | None:
+    async def get_device_by_imei(imei: str) -> str | None:
         """
         Single-connection lookup — checks GpsDevices and SetupShalotrackDevices
         in one borrowed connection to minimise pool pressure during login bursts.
@@ -18,51 +18,45 @@ class DeviceRepository:
            - Activated → auto-create GpsDevices record (second connection via managed_connection)
         3. IMEI not in either table → unknown device, rejected
         """
-        conn = get_db_connection()
+        conn = await get_db_connection()
         try:
-            cursor = conn.cursor()
-
             # Step 1 — already in GpsDevices?
             # A device that already has a GpsDevices row is still refused when its
             # SetupShalotrackDevices row says it is no longer Activated (e.g. a faulty
             # device that was replaced). No setup row at all (legacy/demo device) keeps
             # the old behaviour and is allowed.
-            cursor.execute(
+            result = await conn.fetchrow(
                 '''
                 SELECT g."DeviceId", s."Status"
                 FROM "GpsDevices" g
                 LEFT JOIN "SetupShalotrackDevices" s ON s."ImeiNumber" = g."ImeiNumber"
-                WHERE g."ImeiNumber" = %s
+                WHERE g."ImeiNumber" = $1
                 LIMIT 1
                 ''',
-                (imei,)
+                imei
             )
-            result = cursor.fetchone()
             if result:
-                cursor.close()
-                if result[1] is not None and result[1] != "Activated":
-                    log(f"🚫 IMEI {imei} Status = '{result[1]}' — rejected (already registered)")
+                if result["Status"] is not None and result["Status"] != "Activated":
+                    log(f"🚫 IMEI {imei} Status = '{result['Status']}' — rejected (already registered)")
                     return None
-                return str(result[0])
+                return str(result["DeviceId"])
 
             # Step 2 — check SetupShalotrackDevices, Activated only
-            cursor.execute(
+            setup = await conn.fetchrow(
                 """
                 SELECT "ImeiNumber", "DeviceCategory", "SimNumber", "Status"
                 FROM "SetupShalotrackDevices"
-                WHERE "ImeiNumber" = %s
+                WHERE "ImeiNumber" = $1
                 LIMIT 1
                 """,
-                (imei,)
+                imei
             )
-            setup = cursor.fetchone()
-            cursor.close()
 
             if not setup:
                 log(f"🚫 IMEI {imei} not found in SetupShalotrackDevices — unknown device")
                 return None
 
-            status = setup[3]
+            status = setup["Status"]
             if status != "Activated":
                 log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
                 return None
@@ -72,7 +66,7 @@ class DeviceRepository:
             return None
         finally:
             # Always return connection to pool — even if exception occurred
-            release_db_connection(conn)
+            await release_db_connection(conn)
 
         # Step 3 — Status = 'Activated', auto-create GpsDevices record
         # Uses a fresh managed_connection — previous one already returned to pool
@@ -80,9 +74,8 @@ class DeviceRepository:
         device_id = str(uuid.uuid4())
 
         try:
-            with managed_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with managed_connection() as conn:
+                await conn.execute(
                     """
                     INSERT INTO "GpsDevices"
                     (
@@ -95,31 +88,26 @@ class DeviceRepository:
                         "CreatedAt",
                         "UpdatedAt"
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
                     ON CONFLICT ("ImeiNumber") DO NOTHING
                     """,
-                    (
-                        device_id,
-                        imei,
-                        setup[2],
-                        setup[1] or "V5",
-                        "GT06",
-                        1,
-                    )
+                    device_id,
+                    imei,
+                    setup["SimNumber"],
+                    setup["DeviceCategory"] or "V5",
+                    "GT06",
+                    1,
                 )
-                conn.commit()
 
                 # Re-fetch in case ON CONFLICT DO NOTHING fired
-                cursor.execute(
-                    'SELECT "DeviceId" FROM "GpsDevices" WHERE "ImeiNumber" = %s',
-                    (imei,)
+                row = await conn.fetchrow(
+                    'SELECT "DeviceId" FROM "GpsDevices" WHERE "ImeiNumber" = $1',
+                    imei
                 )
-                row = cursor.fetchone()
-                cursor.close()
 
             if row:
-                log(f"✅ GpsDevices record created — IMEI: {imei} → DeviceId: {row[0]}")
-                return str(row[0])
+                log(f"✅ GpsDevices record created — IMEI: {imei} → DeviceId: {row['DeviceId']}")
+                return str(row["DeviceId"])
             return None
 
         except Exception as e:
@@ -127,55 +115,49 @@ class DeviceRepository:
             return None
 
     @staticmethod
-    def get_vehicle_by_device(device_id: str) -> str | None:
-        conn = get_db_connection()
+    async def get_vehicle_by_device(device_id: str) -> str | None:
+        conn = await get_db_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute(
+            result = await conn.fetchrow(
                 """
                 SELECT "VehicleId" FROM "DeviceAssignments"
-                WHERE "DeviceId" = %s AND "Status" = 1
+                WHERE "DeviceId" = $1 AND "Status" = 1
                 LIMIT 1
                 """,
-                (device_id,)
+                device_id
             )
-            result = cursor.fetchone()
-            cursor.close()
-            return str(result[0]) if result else None
+            return str(result["VehicleId"]) if result else None
         except Exception as e:
             log(f"❌ get_vehicle_by_device error: {e}")
             return None
         finally:
-            release_db_connection(conn)
+            await release_db_connection(conn)
 
     @staticmethod
-    def get_device_status(device_id: str) -> dict | None:
-        conn = get_db_connection()
+    async def get_device_status(device_id: str) -> dict | None:
+        conn = await get_db_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute(
+            result = await conn.fetchrow(
                 """
                 SELECT "IsOnline","BatteryLevel","GpsSignal",
                        "IgnitionStatus","MovementStatus","PowerStatus"
                 FROM "DeviceStatuses"
-                WHERE "DeviceId" = %s LIMIT 1
+                WHERE "DeviceId" = $1 LIMIT 1
                 """,
-                (device_id,)
+                device_id
             )
-            result = cursor.fetchone()
-            cursor.close()
             if result is None:
                 return None
             return {
-                "is_online": result[0],
-                "battery_level": result[1],
-                "gps_signal": result[2],
-                "ignition_status": result[3],
-                "movement_status": result[4],
-                "power_status": result[5],
+                "is_online": result["IsOnline"],
+                "battery_level": result["BatteryLevel"],
+                "gps_signal": result["GpsSignal"],
+                "ignition_status": result["IgnitionStatus"],
+                "movement_status": result["MovementStatus"],
+                "power_status": result["PowerStatus"],
             }
         except Exception as e:
             log(f"❌ get_device_status error: {e}")
             return None
         finally:
-            release_db_connection(conn)
+            await release_db_connection(conn)

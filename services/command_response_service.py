@@ -5,7 +5,7 @@ from repositories.command_response_repository import (
 from utils.logger import log
 
 
-def handle_command_response(
+async def handle_command_response(
     device_id,
     imei,
     response
@@ -22,6 +22,6 @@ def handle_command_response(
         parsed_data=response["data"]
     )
 
-    CommandResponseRepository.save(
+    await CommandResponseRepository.save(
         command_response
     )

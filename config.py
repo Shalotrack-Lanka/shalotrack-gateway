@@ -12,9 +12,10 @@ PORT = int(os.getenv("PORT", "9000"))
 CONNECTION_TIMEOUT = int(os.getenv("CONNECTION_TIMEOUT", "300"))
 
 # Maximum simultaneous device connections.
-# Each connection = 1 OS thread (~8MB stack).
-# t3.small (2GB RAM): safe up to ~200 devices.
-# t3.medium (4GB RAM): safe up to ~400 devices.
+# asyncio connections are coroutines, not OS threads — the RAM ceiling
+# that applied under the old threading model (one thread, ~8MB stack,
+# per device) no longer applies. The DB_POOL_MAX below is now the real
+# constraint on concurrent *active* devices.
 MAX_CONNECTIONS = int(os.getenv("MAX_CONNECTIONS", "500"))
 
 # Seconds to wait for first byte before treating a connection as an
@@ -32,14 +33,3 @@ DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "150"))
 # ================================================================
 LOW_BATTERY_THRESHOLD = int(os.getenv("LOW_BATTERY_THRESHOLD", "2"))
 OVERSPEED_THRESHOLD = int(os.getenv("OVERSPEED_THRESHOLD", "80"))
-
-# ================================================================
-# OTel
-# ================================================================
-# Maximum milliseconds to wait for OTel export before giving up.
-# Critical: prevents OTel from blocking gateway threads when the
-# collector is slow or unreachable (e.g. Tempo OOM crash).
-OTEL_EXPORT_TIMEOUT_MILLIS = int(os.getenv("OTEL_EXPORT_TIMEOUT_MILLIS", "2000"))
-
-# How often to push metrics to the collector (milliseconds).
-OTEL_METRIC_INTERVAL_MILLIS = int(os.getenv("OTEL_METRIC_INTERVAL_MILLIS", "10000"))

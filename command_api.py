@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import threading
@@ -39,6 +40,17 @@ SIMPLE_COMMANDS = {
     "relay_off":     send_relay_off,
     "sos_delete":    send_sos_delete,
 }
+
+# Set once by start_command_api_thread(). The HTTP server runs on its own
+# OS thread (BaseHTTPRequestHandler is synchronous); command_service
+# functions are coroutines that touch the device's asyncio socket, which
+# lives on the main event loop. run_coroutine_threadsafe bridges the two.
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _run_async(coro, timeout: float = 5.0):
+    future = asyncio.run_coroutine_threadsafe(coro, _loop)
+    return future.result(timeout=timeout)
 
 
 class CommandAPIHandler(BaseHTTPRequestHandler):
@@ -113,34 +125,34 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
         try:
             # Simple commands — no params needed
             if command in SIMPLE_COMMANDS:
-                SIMPLE_COMMANDS[command](imei)
+                _run_async(SIMPLE_COMMANDS[command](imei))
 
             # Parametrised commands
             elif command == "timer":
-                send_timer(imei, int(params["t1"]), int(params["t2"]))
+                _run_async(send_timer(imei, int(params["t1"]), int(params["t2"])))
 
             elif command == "distance":
-                send_distance(imei, int(params["meters"]))
+                _run_async(send_distance(imei, int(params["meters"])))
 
             elif command == "speed_alarm":
-                send_speed_alarm(
+                _run_async(send_speed_alarm(
                     imei,
                     enabled=bool(params.get("enabled", True)),
                     interval=int(params.get("interval", 20)),
                     limit_kmh=int(params.get("limit_kmh", 100)),
                     sms=bool(params.get("sms", True))
-                )
+                ))
 
             elif command == "moving_alarm":
-                send_moving_alarm(
+                _run_async(send_moving_alarm(
                     imei,
                     enabled=bool(params.get("enabled", True)),
                     radius_m=int(params.get("radius_m", 300)),
                     sms=bool(params.get("sms", True))
-                )
+                ))
 
             elif command == "fence_circle":
-                send_fence_circle(
+                _run_async(send_fence_circle(
                     imei,
                     enabled=bool(params.get("enabled", True)),
                     lat=float(params["lat"]),
@@ -148,46 +160,46 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
                     radius_100m=int(params["radius_100m"]),
                     trigger=params.get("trigger", ""),
                     sms=bool(params.get("sms", True))
-                )
+                ))
 
             elif command == "sos_add":
-                send_sos_add(
+                _run_async(send_sos_add(
                     imei,
                     phone1=params.get("phone1", ""),
                     phone2=params.get("phone2", ""),
                     phone3=params.get("phone3", "")
-                )
+                ))
 
             elif command == "apn":
-                send_apn(
+                _run_async(send_apn(
                     imei,
                     apn_name=params["apn_name"],
                     user=params.get("user", ""),
                     pwd=params.get("pwd", "")
-                )
+                ))
 
             elif command == "server":
-                send_server(
+                _run_async(send_server(
                     imei,
                     domain_or_ip=params["domain_or_ip"],
                     port=int(params["port"]),
                     use_domain=bool(params.get("use_domain", True)),
                     udp=bool(params.get("udp", False))
-                )
+                ))
 
             elif command == "batalm":
-                send_batalm(
+                _run_async(send_batalm(
                     imei,
                     enabled=bool(params.get("enabled", True)),
                     sms=bool(params.get("sms", True))
-                )
+                ))
 
             elif command == "poweralm":
-                send_poweralm(
+                _run_async(send_poweralm(
                     imei,
                     enabled=bool(params.get("enabled", True)),
                     sms=bool(params.get("sms", True))
-                )
+                ))
 
             else:
                 self._send_json(400, {
@@ -206,6 +218,9 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
 
         except KeyError as ex:
             self._send_json(400, {"error": f"Missing required param: {ex}"})
+        except TimeoutError:
+            log(f"[CommandAPI] ❌ Timed out sending '{command}' to {imei}")
+            self._send_json(503, {"success": False, "error": "Gateway busy — command timed out"})
         except Exception as ex:
             log(f"[CommandAPI] ❌ Failed '{command}' → {imei}: {ex}")
             if "offline" in str(ex).lower():
@@ -220,7 +235,9 @@ def start_command_api():
     server.serve_forever()
 
 
-def start_command_api_thread():
+def start_command_api_thread(loop: asyncio.AbstractEventLoop):
+    global _loop
+    _loop = loop
     thread = threading.Thread(target=start_command_api, daemon=True)
     thread.start()
     return thread

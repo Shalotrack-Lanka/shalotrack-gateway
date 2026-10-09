@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import time
 from services.command_service import (
@@ -11,9 +12,21 @@ from services.command_service import (
     send_relay_off
 )
 
-def start_console():
+
+def start_console(loop: asyncio.AbstractEventLoop):
+    """
+    Blocking console loop — runs in a background thread (via
+    loop.run_in_executor), not on the event loop itself, since input()
+    blocks. Commands are async (they write to a device's socket), so each
+    one is scheduled onto the event loop and we block this thread until
+    it completes.
+    """
+
+    def run(coro, timeout: float = 5.0):
+        return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
+
     print("\n===== ShaloTrack Command Console =====")
-    
+
     if not sys.stdin.isatty():
         print("Headless environment detected. Console input disabled.")
         try:
@@ -52,21 +65,21 @@ def start_console():
             action, imei = parts
 
             if action == "where":
-                send_where(imei)
+                run(send_where(imei))
             elif action == "status":
-                send_status(imei)
+                run(send_status(imei))
             elif action == "version":
-                send_version(imei)
+                run(send_version(imei))
             elif action == "params":
-                send_params(imei)
+                run(send_params(imei))
             elif action == "imei":
-                send_imei(imei)
+                run(send_imei(imei))
             elif action == "reset":
-                send_reset(imei)
+                run(send_reset(imei))
             elif action == "relay_on":
-                send_relay_on(imei)
+                run(send_relay_on(imei))
             elif action == "relay_off":
-                send_relay_off(imei)
+                run(send_relay_off(imei))
             else:
                 print("Unknown command")
 
