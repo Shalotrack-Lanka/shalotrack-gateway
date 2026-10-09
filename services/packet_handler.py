@@ -1,7 +1,5 @@
 import time
 import json
-from telemetry import telemetry as tel
-from opentelemetry import trace
 
 from parsers.v5_parser import (
     parse_login_packet,
@@ -62,14 +60,6 @@ def _log_unknown(protocol, raw, hex_data):
 def process_packet(data, conn, addr):
     """
     Process a single GT06/V5 packet.
-
-    CRITICAL ARCHITECTURE NOTE:
-    All database operations are performed BEFORE the OTel span context.
-    This ensures DB connections are returned to the pool immediately
-    after use, regardless of how long OTel takes to export spans.
-
-    Previously, DB connections were held inside the OTel span block,
-    causing pool exhaustion when OTel was slow (e.g. Tempo crashing).
     """
     start_time = time.time()
 
@@ -81,7 +71,6 @@ def process_packet(data, conn, addr):
         protocol = f"{raw[4]:02x}"
     else:
         log("❌ Invalid packet")
-        tel.parsing_errors.add(1, {"error_type": "InvalidHeader"})
         return None
 
     log(f"Protocol: {protocol}")
@@ -89,11 +78,6 @@ def process_packet(data, conn, addr):
     current_imei = None
     connection_imei = get_imei_by_socket(conn)
     error = None
-
-    # ================================================================
-    # ALL DB OPERATIONS HAPPEN HERE — OUTSIDE THE OTEL SPAN
-    # Connections are borrowed, used, and returned before OTel runs
-    # ================================================================
 
     try:
         # ================================================================
@@ -109,7 +93,6 @@ def process_packet(data, conn, addr):
 
             if not device_id:
                 log(f"🚫 REJECTED — IMEI not admin-activated: {login['imei']} from {addr[0]}")
-                tel.parsing_errors.add(1, {"error_type": "UnauthorisedDevice", "protocol": protocol})
             else:
                 log(f"✅ Authorised Device — IMEI: {login['imei']}")
                 register_device(login["imei"], addr[0], device_id, conn)
@@ -369,7 +352,6 @@ def process_packet(data, conn, addr):
     except Exception as ex:
         error = ex
         log(f"❌ PACKET ERROR [{protocol}]: {ex}")
-        tel.parsing_errors.add(1, {"error_type": type(ex).__name__, "protocol": protocol})
 
     # ================================================================
     # ACK — always fires, even on error
@@ -380,22 +362,5 @@ def process_packet(data, conn, addr):
         log(f"📤 ACK sent: {ack.hex().upper()}")
     except Exception as ex:
         log(f"❌ ACK ERROR: {ex}")
-
-    # ================================================================
-    # OTEL SPAN — runs AFTER all DB work and ACK are complete
-    # DB connections are already returned to pool by this point
-    # ================================================================
-    duration = time.time() - start_time
-    with tel.tracer.start_as_current_span("process_gps_packet") as span:
-        span.set_attribute("packet.protocol", protocol)
-        span.set_attribute("packet.raw_length", len(data))
-        if current_imei:
-            span.set_attribute("device.imei", current_imei)
-        if error:
-            span.record_exception(error)
-            span.set_status(trace.StatusCode.ERROR, str(error))
-
-    tel.packets_processed.add(1, {"status": "success" if not error else "error", "protocol": protocol})
-    tel.processing_latency.record(duration)
 
     return current_imei

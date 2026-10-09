@@ -2,7 +2,6 @@ import socket
 import os
 import threading
 
-from telemetry import telemetry as tel
 from config import CONNECTION_TIMEOUT
 from services.packet_handler import process_packet
 from services.device_registry import (
@@ -85,7 +84,6 @@ def handle_device(conn, addr):
         return
 
     log(f"✅ Device connected: {addr}")
-    tel.active_connections.add(1)
 
     imei = None
     buffer = b""
@@ -124,7 +122,6 @@ def handle_device(conn, addr):
                 log("📴 Device marked Offline")
 
         conn.close()
-        tel.active_connections.add(-1)
         _connection_semaphore.release()
         log("🔌 Device disconnected")
 
