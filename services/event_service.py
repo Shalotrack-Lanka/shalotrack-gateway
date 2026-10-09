@@ -15,12 +15,16 @@ async def create_event(
         description=None,
         metadata=None
 ):
-    # asyncpg binds parameters strictly by type — unlike psycopg2, it will
-    # not silently stringify an IntEnum/Enum for a text column. EventType
-    # and Severity are both Enums upstream (Severity is an IntEnum), so
-    # normalise them to plain str here, once, for every caller.
+    # asyncpg binds parameters strictly by type. EventType is TEXT in the real
+    # schema, so normalising it to a plain str is correct. Severity is SMALLINT
+    # in the real schema (confirmed via information_schema against production,
+    # 2026-10-10) — it must stay an int, not be stringified. An earlier version
+    # of this function stringified both, which broke every login/alarm/info
+    # event write in production because asyncpg refused to bind a str to a
+    # smallint column. Do not "fix" this back to str without checking the real
+    # column type first.
     event_type_value = event_type.value if hasattr(event_type, "value") else event_type
-    severity_value = str(severity.value) if hasattr(severity, "value") else str(severity)
+    severity_value = int(severity.value) if hasattr(severity, "value") else int(severity)
 
     async with managed_connection() as conn:
         await conn.execute(
