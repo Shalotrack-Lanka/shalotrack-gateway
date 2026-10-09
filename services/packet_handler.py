@@ -116,6 +116,25 @@ async def process_packet(data, writer, addr):
         elif protocol in ["12", "22"]:
             log("📍 LOCATION RECEIVED")
             location = parse_location_packet(raw)
+
+            # Physically impossible values must never reach the DB. This app has
+            # an SOS feature that shows the customer's live location on a map
+            # during an emergency — a bad write here isn't just a dashboard bug,
+            # it's a wrong position shown while someone may be in danger. Reject
+            # the whole update rather than clamp: a missing location is visibly
+            # stale, a clamped-but-wrong one looks valid and isn't. Found
+            # 2026-10-10 after a float-precision bug (separately fixed in
+            # tracking_service.py) let a corrupt value through and broke a
+            # customer's dashboard within minutes of the asyncio rewrite going
+            # live — this is the second, independent layer of defence so a
+            # different kind of bad value can't do the same thing again.
+            lat, lon = location["latitude"], location["longitude"]
+            speed, heading = location["speed"], location["heading"]
+            if not (-90 <= lat <= 90) or not (-180 <= lon <= 180) \
+                    or not (0 <= speed <= 300) or not (0 <= heading <= 360):
+                log(f"🚨 REJECTED invalid location — lat={lat} lon={lon} speed={speed} heading={heading}")
+                return current_imei
+
             log(f"Latitude: {location['latitude']}")
             log(f"Longitude: {location['longitude']}")
             log(f"Speed: {location['speed']}")

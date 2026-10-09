@@ -1,6 +1,27 @@
 from database import managed_connection
 from datetime import datetime, timezone
+from decimal import Decimal
 from utils.logger import log
+
+
+def _clean_decimal(value, places=6):
+    """
+    asyncpg binds a Python float to a numeric column by encoding its EXACT
+    IEEE-754 decimal expansion, not its short repr — e.g. 7.025998333333333
+    becomes '7.02599833333333290141808902262710034847259521484375' (53
+    digits). Postgres accepts it fine (numeric has no precision limit), but
+    Npgsql/C# decimal does not (~28-29 significant digits max), so the C#
+    API throws OverflowException the first time it reads the row back.
+    psycopg2 never had this problem — it serialises floats via repr().
+    Round first, then build the Decimal from the STRING, not the float, so
+    asyncpg gets a short, clean value instead of binary noise.
+    Found 2026-10-10: a real device's first location write under the new
+    asyncpg code broke a live customer's dashboard within minutes of
+    going live.
+    """
+    if value is None:
+        return None
+    return Decimal(str(round(value, places)))
 
 
 async def save_tracking(device_id, latitude, longitude, speed, heading, satellites, event_time):
@@ -11,7 +32,8 @@ async def save_tracking(device_id, latitude, longitude, speed, heading, satellit
             ("DeviceId","Latitude","Longitude","Altitude","Speed","Heading","Satellites","GpsAccuracy","EventTime","CreatedAt")
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
             """,
-            device_id, latitude, longitude, None, speed, heading, satellites, None, event_time
+            device_id, _clean_decimal(latitude), _clean_decimal(longitude), None,
+            _clean_decimal(speed, 2), _clean_decimal(heading, 2), satellites, None, event_time
         )
 
 
@@ -38,7 +60,8 @@ async def update_current_location(device_id, vehicle_id, latitude, longitude, sp
                 "MovementStatus" = EXCLUDED."MovementStatus",
                 "IgnitionStatus" = EXCLUDED."IgnitionStatus"
             """,
-            device_id, vehicle_id, latitude, longitude, speed, heading, ignition_status, speed > 0, event_time
+            device_id, vehicle_id, _clean_decimal(latitude), _clean_decimal(longitude),
+            _clean_decimal(speed, 2), _clean_decimal(heading, 2), ignition_status, speed > 0, event_time
         )
 
 
