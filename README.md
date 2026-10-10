@@ -34,7 +34,6 @@ ShaloTrack API (ASP.NET Core)  ←── HTTP command API (port 9001)
 - Alarm events fully persisted to `DeviceEvents` with severity classification and structured metadata (alarm type, coordinates, battery, signal, ignition state)
 - Protocol 94 (Information) and 6e (Configuration) fully decoded through the sub-field decoder pipeline and persisted as `DEVICE_INFORMATION` / `DEVICE_CONFIGURATION` events
 - HTTP Command API on port 9001 — internal VPC-only endpoint for the C# API to send commands to connected devices without SSH or console access
-- OpenTelemetry instrumentation (traces, metrics, logs) exported to the SRE observability stack via OTLP gRPC
 - Dockerized for deployment on AWS EC2 with ECR image management and SSM-parameter-driven configuration
 
 ---
@@ -47,7 +46,6 @@ ShaloTrack API (ASP.NET Core)  ←── HTTP command API (port 9001)
 | Networking | Raw TCP sockets (`socket`, `threading`) |
 | Database | PostgreSQL via `psycopg2-binary` (ThreadedConnectionPool) |
 | Config | Environment variables via `python-dotenv` + AWS SSM Parameter Store |
-| Observability | OpenTelemetry SDK, OTLP gRPC exporter |
 | Deployment | Docker, AWS ECR, AWS EC2, GitHub Actions CI/CD |
 
 ---
@@ -73,7 +71,6 @@ DB_POOL_MIN=5
 DB_POOL_MAX=60
 LOW_BATTERY_THRESHOLD=2
 OVERSPEED_THRESHOLD=80
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.shalotrack.internal:4317
 ```
 
 ---
@@ -319,12 +316,8 @@ AWS NLB (port 8000) ──► Gateway EC2 (t3.small)
                               │
                          Docker container
                               │
-                    ┌─────────┴──────────┐
-                    │                    │
-             Supabase DB1           OTel Collector
-           (GPS telemetry)        (traces/metrics/logs)
-                                        │
-                                   Grafana/Prometheus
+                         Supabase DB1
+                       (GPS telemetry)
 ```
 
 **Configuration via AWS SSM Parameter Store:**
