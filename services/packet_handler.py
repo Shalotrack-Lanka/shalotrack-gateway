@@ -130,10 +130,18 @@ async def process_packet(data, writer, addr):
             # different kind of bad value can't do the same thing again.
             lat, lon = location["latitude"], location["longitude"]
             speed, heading = location["speed"], location["heading"]
-            if not (-90 <= lat <= 90) or not (-180 <= lon <= 180) \
-                    or not (0 <= speed <= 300) or not (0 <= heading <= 360):
+            location_valid = (
+                -90 <= lat <= 90 and -180 <= lon <= 180
+                and 0 <= speed <= 300 and 0 <= heading <= 360
+            )
+            if not location_valid:
+                # Do NOT `return` here: the ACK block at the bottom of this
+                # function must still run. A GT06 tracker that doesn't get an
+                # ACK treats the packet as undelivered and re-sends it (and
+                # eventually reconnects), so one bad fix would turn into a
+                # retransmit loop. Reject the data, acknowledge the packet.
                 log(f"🚨 REJECTED invalid location — lat={lat} lon={lon} speed={speed} heading={heading}")
-                return current_imei
+                current_imei = connection_imei
 
             log(f"Latitude: {location['latitude']}")
             log(f"Longitude: {location['longitude']}")
@@ -141,7 +149,7 @@ async def process_packet(data, writer, addr):
             log(f"Time: {location['timestamp']}")
             log(f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}")
 
-            device = _get_device(connection_imei, writer)
+            device = _get_device(connection_imei, writer) if location_valid else None
             if device:
                 await _save_raw(device["device_id"], protocol, hex_data)
                 await save_tracking(

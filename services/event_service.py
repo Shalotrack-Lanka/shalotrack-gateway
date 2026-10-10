@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from database import managed_connection
+from utils.numeric import clean_coordinates
 
 
 async def create_event(
@@ -25,6 +26,15 @@ async def create_event(
     # column type first.
     event_type_value = event_type.value if hasattr(event_type, "value") else event_type
     severity_value = int(severity.value) if hasattr(severity, "value") else int(severity)
+
+    # Latitude/Longitude are `numeric` columns. A raw Python float is bound by
+    # asyncpg as its 50+ digit binary expansion, which Postgres stores happily
+    # and the C# API (decimal, ~28 digits) crashes on when it reads the row
+    # back — the 2026-10-10 dashboard outage. Clean at the write boundary so no
+    # caller (alarm handler today, anything tomorrow) can forget.
+    # If coordinates are missing/invalid we still record the event with a NULL
+    # position: an alarm (e.g. SOS) must never be dropped over a bad GPS fix.
+    latitude, longitude = clean_coordinates(latitude, longitude)
 
     async with managed_connection() as conn:
         await conn.execute(

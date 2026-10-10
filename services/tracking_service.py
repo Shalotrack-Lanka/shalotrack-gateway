@@ -1,27 +1,9 @@
 from database import managed_connection
 from datetime import datetime, timezone
-from decimal import Decimal
 from utils.logger import log
-
-
-def _clean_decimal(value, places=6):
-    """
-    asyncpg binds a Python float to a numeric column by encoding its EXACT
-    IEEE-754 decimal expansion, not its short repr — e.g. 7.025998333333333
-    becomes '7.02599833333333290141808902262710034847259521484375' (53
-    digits). Postgres accepts it fine (numeric has no precision limit), but
-    Npgsql/C# decimal does not (~28-29 significant digits max), so the C#
-    API throws OverflowException the first time it reads the row back.
-    psycopg2 never had this problem — it serialises floats via repr().
-    Round first, then build the Decimal from the STRING, not the float, so
-    asyncpg gets a short, clean value instead of binary noise.
-    Found 2026-10-10: a real device's first location write under the new
-    asyncpg code broke a live customer's dashboard within minutes of
-    going live.
-    """
-    if value is None:
-        return None
-    return Decimal(str(round(value, places)))
+# Every float bound to a numeric column MUST go through clean_decimal — see
+# utils/numeric.py for the 2026-10-10 incident this prevents.
+from utils.numeric import clean_decimal as _clean_decimal
 
 
 async def save_tracking(device_id, latitude, longitude, speed, heading, satellites, event_time):
