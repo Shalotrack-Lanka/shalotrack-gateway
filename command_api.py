@@ -13,6 +13,7 @@ from services.command_service import (
     send_timer, send_distance, send_speed_alarm, send_moving_alarm,
     send_fence_circle, send_sos_add, send_sos_delete,
     send_apn, send_server, send_batalm, send_poweralm,
+    UnsupportedCommandError,
 )
 from services.device_registry import get_all_devices
 
@@ -77,6 +78,7 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
                     "imei": imei,
                     "device_id": info["device_id"],
                     "ip": info["ip"],
+                    "protocol": info.get("protocol", "GT06"),
                     "connected_at": info["connected_at"].isoformat(),
                     "last_seen": info["last_seen"].isoformat(),
                 }
@@ -216,6 +218,8 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
                 "message": f"Command '{command}' sent to device"
             })
 
+        except UnsupportedCommandError as ex:
+            self._send_json(501, {"success": False, "error": str(ex)})
         except KeyError as ex:
             self._send_json(400, {"error": f"Missing required param: {ex}"})
         except TimeoutError:

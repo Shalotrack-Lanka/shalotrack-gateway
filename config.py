@@ -23,6 +23,21 @@ MAX_CONNECTIONS = int(os.getenv("MAX_CONNECTIONS", "500"))
 PROBE_TIMEOUT = float(os.getenv("PROBE_TIMEOUT", "1.0"))
 
 # ================================================================
+# GPS103 (TK103A/B) text protocol
+# ================================================================
+# The GPS103 position report carries speed in KNOTS on every firmware we have
+# documentation for (Traccar's decoder passes the field through as knots).
+# Some clones send km/h instead. Verify on the first real unit by comparing
+# against the vehicle speedometer, and flip this to "true" if it reads low
+# by a factor of ~1.85.
+GPS103_SPEED_IN_KMH = os.getenv("GPS103_SPEED_IN_KMH", "false").lower() == "true"
+
+# A GPS103 message ends with ';'. If this many bytes arrive with no ';' the
+# stream is garbage (or an attack): the connection is dropped instead of
+# buffering forever.
+GPS103_MAX_UNFRAMED_BYTES = int(os.getenv("GPS103_MAX_UNFRAMED_BYTES", "2048"))
+
+# ================================================================
 # Database
 # ================================================================
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "5"))

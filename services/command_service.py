@@ -1,4 +1,4 @@
-from services.device_registry import get_socket
+from services.device_registry import get_socket, get_device
 from utils.command_builder import (
     build_where, build_status, build_version, build_imei, build_params,
     build_gprsset, build_url, build_position, build_fence_query,
@@ -12,10 +12,26 @@ from utils.command_builder import (
 from utils.logger import log
 
 
+class UnsupportedCommandError(Exception):
+    """The connected device speaks a protocol the command builders do not cover."""
+
+
 async def send_command(imei, command):
     writer = get_socket(imei)
     if not writer:
         raise Exception("Device Offline")
+
+    # Every builder in utils/command_builder.py produces a GT06 binary frame.
+    # Writing that to a GPS103 (TK103A/B) socket would send the unit garbage
+    # (or worse, something it misreads), so refuse until a per-protocol
+    # command builder exists.
+    entry = get_device(imei)
+    protocol = entry.get("protocol", "GT06") if entry else "GT06"
+    if protocol != "GT06":
+        raise UnsupportedCommandError(
+            f"Commands are not supported yet for {protocol} devices"
+        )
+
     log(f"📤 Sending command to {imei} — HEX: {command.hex().upper()}")
     writer.write(command)
     await writer.drain()

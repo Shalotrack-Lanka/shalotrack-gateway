@@ -70,6 +70,60 @@ async def update_device_status(device_id, battery_level, gps_signal, ignition_st
         )
 
 
+async def mark_device_alive(device_id, heartbeat: bool = False):
+    """
+    Mark a device online and refresh LastSeen (and LastHeartbeat when
+    `heartbeat` is True) WITHOUT touching battery/signal/ignition/power.
+
+    For protocols whose heartbeat carries no telemetry (GPS103: the heartbeat
+    is just the IMEI). update_device_status() cannot be used there: it
+    overwrites BatteryLevel/GpsSignal with whatever it is given, and
+    DeviceStatuses.BatteryLevel / GpsSignal / PowerStatus are NOT NULL, so we
+    cannot pass "unknown" either.
+
+    First contact (no DeviceStatuses row yet) inserts neutral defaults:
+    BatteryLevel 0, GpsSignal 0, PowerStatus 1 (normal). BatteryLevel 0 is a
+    placeholder meaning "not reported" -- see docs/multi-protocol.md.
+    """
+    now = datetime.now(timezone.utc)
+    async with managed_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO "DeviceStatuses"
+            ("DeviceId","IsOnline","LastHeartbeat","LastSeen","GpsSignal","BatteryLevel","IgnitionStatus","MovementStatus","PowerStatus","UpdatedAt")
+            VALUES ($1, TRUE, $2, $3, 0, 0, FALSE, FALSE, 1, $3)
+            ON CONFLICT ("DeviceId") DO UPDATE SET
+                "IsOnline"      = TRUE,
+                "LastHeartbeat" = COALESCE(EXCLUDED."LastHeartbeat", "DeviceStatuses"."LastHeartbeat"),
+                "LastSeen"      = EXCLUDED."LastSeen",
+                "UpdatedAt"     = EXCLUDED."UpdatedAt"
+            """,
+            device_id, now if heartbeat else None, now
+        )
+
+
+async def set_ignition(device_id, ignition_status: bool):
+    """
+    Record ignition state only (GPS103 reports it via 'acc on' / 'acc off'
+    alarms and an optional flag in position reports). Same insert-defaults
+    rule as mark_device_alive().
+    """
+    now = datetime.now(timezone.utc)
+    async with managed_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO "DeviceStatuses"
+            ("DeviceId","IsOnline","LastHeartbeat","LastSeen","GpsSignal","BatteryLevel","IgnitionStatus","MovementStatus","PowerStatus","UpdatedAt")
+            VALUES ($1, TRUE, NULL, $2, 0, 0, $3, FALSE, 1, $2)
+            ON CONFLICT ("DeviceId") DO UPDATE SET
+                "IgnitionStatus" = EXCLUDED."IgnitionStatus",
+                "LastSeen"       = EXCLUDED."LastSeen",
+                "UpdatedAt"      = EXCLUDED."UpdatedAt"
+            """,
+            device_id, now, bool(ignition_status)
+        )
+
+
 async def update_heartbeat(device_id):
     now = datetime.now(timezone.utc)
     async with managed_connection() as conn:

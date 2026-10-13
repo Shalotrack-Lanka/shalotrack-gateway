@@ -213,8 +213,12 @@ shalotrack-gateway/
 ├── config.py                  # Environment-driven configuration
 ├── database.py                # Thread-safe PostgreSQL connection pool with retry-on-exhaustion
 │
+├── protocols/
+│   └── detect.py              # Per-connection protocol detection (first bytes) -> GT06 / GPS103
+│
 ├── parsers/
-│   └── v5_parser.py           # All GT06/V5 packet parsing + CRC16-X25 + ACK building
+│   ├── v5_parser.py           # All GT06/V5 packet parsing + CRC16-X25 + ACK building
+│   └── gps103_parser.py       # GPS103 (TK103A/B) framing + text parsing (pure functions)
 │
 ├── decoders/                  # Protocol 0x94 / 0x6e Information packet sub-field decoders
 │   ├── information_decoder.py     (orchestrator)
@@ -227,7 +231,8 @@ shalotrack-gateway/
 │   └── sim_decoder.py
 │
 ├── services/
-│   ├── packet_handler.py      # Central dispatcher: protocol detection → parse → save → ACK
+│   ├── packet_handler.py      # GT06 dispatcher: protocol detection → parse → save → ACK
+│   ├── gps103_handler.py      # GPS103 dispatcher: login / heartbeat / position / alarms
 │   ├── device_registry.py     # Thread-safe in-memory registry (IMEI → socket, O(1) reverse lookup)
 │   ├── command_service.py     # Sends remote commands to connected device sockets
 │   ├── tracking_service.py    # Writes GPS/status/heartbeat data to PostgreSQL
@@ -288,7 +293,16 @@ services/packet_handler.py: process_packet()
 
 ---
 
-## Supported Protocols
+## Supported Device Families
+
+One TCP port serves several families; the family is detected from each connection's first bytes. Details, field rules and the verification checklist are in [`docs/multi-protocol.md`](docs/multi-protocol.md).
+
+| Family | Devices | Status |
+|---|---|---|
+| `GT06` | V5 (2G) | Production |
+| `GPS103` | TK103A/B (Coban family) | Inbound only: login, heartbeat, position, alarms. Commands return `501`. Not yet verified on hardware. |
+
+## Supported Protocols (GT06)
 
 | Code | Name | Status |
 |---|---|---|
