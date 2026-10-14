@@ -6,7 +6,7 @@ _by_socket: dict[int, str] = {}
 _lock = threading.RLock()
 
 
-def register_device(imei: str, ip: str, device_id: str, conn) -> None:
+def register_device(imei: str, ip: str, device_id: str, conn, protocol: str = "GT06") -> None:
     with _lock:
         existing = _by_imei.get(imei)
         if existing:
@@ -15,6 +15,7 @@ def register_device(imei: str, ip: str, device_id: str, conn) -> None:
         entry = {
             "device_id": device_id,
             "ip": ip,
+            "protocol": protocol,
             "socket": conn,
             "connected_at": datetime.now(timezone.utc),
             "last_seen": datetime.now(timezone.utc),

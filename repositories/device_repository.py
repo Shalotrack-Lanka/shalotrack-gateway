@@ -6,8 +6,17 @@ import uuid
 class DeviceRepository:
 
     @staticmethod
-    async def get_device_by_imei(imei: str) -> str | None:
+    async def get_device_by_imei(
+        imei: str,
+        protocol_type: str = "GT06",
+        default_model: str = "V5",
+    ) -> str | None:
         """
+        protocol_type / default_model only matter on the auto-registration path
+        (first login of a newly Activated device): they are written to
+        GpsDevices.ProtocolType and, when SetupShalotrackDevices.DeviceCategory
+        is empty, GpsDevices.DeviceModel. Defaults keep the V5 behaviour.
+
         Single-connection lookup — checks GpsDevices and SetupShalotrackDevices
         in one borrowed connection to minimise pool pressure during login bursts.
 
@@ -94,8 +103,8 @@ class DeviceRepository:
                     device_id,
                     imei,
                     setup["SimNumber"],
-                    setup["DeviceCategory"] or "V5",
-                    "GT06",
+                    setup["DeviceCategory"] or default_model,
+                    protocol_type,
                     1,
                 )
 

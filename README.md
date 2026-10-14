@@ -34,7 +34,6 @@ ShaloTrack API (ASP.NET Core)  ←── HTTP command API (port 9001)
 - Alarm events fully persisted to `DeviceEvents` with severity classification and structured metadata (alarm type, coordinates, battery, signal, ignition state)
 - Protocol 94 (Information) and 6e (Configuration) fully decoded through the sub-field decoder pipeline and persisted as `DEVICE_INFORMATION` / `DEVICE_CONFIGURATION` events
 - HTTP Command API on port 9001 — internal VPC-only endpoint for the C# API to send commands to connected devices without SSH or console access
-- OpenTelemetry instrumentation (traces, metrics, logs) exported to the SRE observability stack via OTLP gRPC
 - Dockerized for deployment on AWS EC2 with ECR image management and SSM-parameter-driven configuration
 
 ---
@@ -47,7 +46,6 @@ ShaloTrack API (ASP.NET Core)  ←── HTTP command API (port 9001)
 | Networking | Raw TCP sockets (`socket`, `threading`) |
 | Database | PostgreSQL via `psycopg2-binary` (ThreadedConnectionPool) |
 | Config | Environment variables via `python-dotenv` + AWS SSM Parameter Store |
-| Observability | OpenTelemetry SDK, OTLP gRPC exporter |
 | Deployment | Docker, AWS ECR, AWS EC2, GitHub Actions CI/CD |
 
 ---
@@ -73,7 +71,6 @@ DB_POOL_MIN=5
 DB_POOL_MAX=60
 LOW_BATTERY_THRESHOLD=2
 OVERSPEED_THRESHOLD=80
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel.shalotrack.internal:4317
 ```
 
 ---
@@ -216,8 +213,12 @@ shalotrack-gateway/
 ├── config.py                  # Environment-driven configuration
 ├── database.py                # Thread-safe PostgreSQL connection pool with retry-on-exhaustion
 │
+├── protocols/
+│   └── detect.py              # Per-connection protocol detection (first bytes) -> GT06 / GPS103
+│
 ├── parsers/
-│   └── v5_parser.py           # All GT06/V5 packet parsing + CRC16-X25 + ACK building
+│   ├── v5_parser.py           # All GT06/V5 packet parsing + CRC16-X25 + ACK building
+│   └── gps103_parser.py       # GPS103 (TK103A/B) framing + text parsing (pure functions)
 │
 ├── decoders/                  # Protocol 0x94 / 0x6e Information packet sub-field decoders
 │   ├── information_decoder.py     (orchestrator)
@@ -230,7 +231,8 @@ shalotrack-gateway/
 │   └── sim_decoder.py
 │
 ├── services/
-│   ├── packet_handler.py      # Central dispatcher: protocol detection → parse → save → ACK
+│   ├── packet_handler.py      # GT06 dispatcher: protocol detection → parse → save → ACK
+│   ├── gps103_handler.py      # GPS103 dispatcher: login / heartbeat / position / alarms
 │   ├── device_registry.py     # Thread-safe in-memory registry (IMEI → socket, O(1) reverse lookup)
 │   ├── command_service.py     # Sends remote commands to connected device sockets
 │   ├── tracking_service.py    # Writes GPS/status/heartbeat data to PostgreSQL
@@ -291,7 +293,16 @@ services/packet_handler.py: process_packet()
 
 ---
 
-## Supported Protocols
+## Supported Device Families
+
+One TCP port serves several families; the family is detected from each connection's first bytes. Details, field rules and the verification checklist are in [`docs/multi-protocol.md`](docs/multi-protocol.md).
+
+| Family | Devices | Status |
+|---|---|---|
+| `GT06` | V5 (2G) | Production |
+| `GPS103` | TK103A/B (Coban family) | Inbound only: login, heartbeat, position, alarms. Commands return `501`. Not yet verified on hardware. |
+
+## Supported Protocols (GT06)
 
 | Code | Name | Status |
 |---|---|---|
@@ -319,12 +330,8 @@ AWS NLB (port 8000) ──► Gateway EC2 (t3.small)
                               │
                          Docker container
                               │
-                    ┌─────────┴──────────┐
-                    │                    │
-             Supabase DB1           OTel Collector
-           (GPS telemetry)        (traces/metrics/logs)
-                                        │
-                                   Grafana/Prometheus
+                         Supabase DB1
+                       (GPS telemetry)
 ```
 
 **Configuration via AWS SSM Parameter Store:**
