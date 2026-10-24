@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import json
 import os
 import threading
@@ -18,6 +19,14 @@ from services.command_service import (
 from services.device_registry import get_all_devices
 
 COMMAND_API_PORT = int(os.environ.get("COMMAND_API_PORT", 9001))
+
+# SECURITY: this HTTP endpoint can command a physical GPS/relay device —
+# relay_off cuts a vehicle's engine relay, server/apn can redirect a device's
+# reporting target. It is reachable by anything in the VPC, not just the C#
+# API. A security-group CIDR rule is not an auth control, so every request
+# must present this shared secret. Same shared-secret pattern already used
+# for Admin<->API (AdminSyncKeyMiddleware / AdminSync:Key) — same idea here.
+COMMAND_API_KEY = os.environ.get("COMMAND_API_KEY", "")
 
 # Simple commands — no extra parameters needed
 SIMPLE_COMMANDS = {
@@ -67,7 +76,20 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _authorized(self) -> bool:
+        # Constant-time comparison (hmac.compare_digest) so a byte-by-byte
+        # timing difference can't be used to guess the key. COMMAND_API_KEY
+        # is required at startup (see start_command_api below), so an empty
+        # expected key here would mean that guard was bypassed — treat it as
+        # "deny everything" rather than "allow everything".
+        provided = self.headers.get("X-Command-Api-Key", "")
+        return bool(COMMAND_API_KEY) and hmac.compare_digest(provided, COMMAND_API_KEY)
+
     def do_GET(self):
+        if not self._authorized():
+            self._send_json(401, {"error": "Unauthorized"})
+            return
+
         if self.path == "/health":
             self._send_json(200, {"status": "ok"})
 
@@ -98,6 +120,10 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
+        if not self._authorized():
+            self._send_json(401, {"error": "Unauthorized"})
+            return
+
         if self.path != "/command":
             self._send_json(404, {"error": "Not found"})
             return
@@ -234,6 +260,17 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
 
 
 def start_command_api():
+    if not COMMAND_API_KEY:
+        # Fail closed, not open: refuse to serve this endpoint at all rather
+        # than start it unauthenticated. The main TCP device-ingestion server
+        # (tcp_server.py, port 9000) runs on a separate thread/loop and is
+        # unaffected — losing "send commands to devices" is far better than
+        # letting anyone on the network issue them.
+        log("🚨 FATAL: COMMAND_API_KEY is not set. Refusing to start the Command API "
+            "(it would otherwise accept relay_off/server/apn commands from anyone "
+            "who can reach this port, unauthenticated). GPS ingestion is unaffected.")
+        return
+
     server = HTTPServer(("0.0.0.0", COMMAND_API_PORT), CommandAPIHandler)
     log(f"🌐 Command API listening on port {COMMAND_API_PORT}")
     server.serve_forever()
