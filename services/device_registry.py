@@ -5,6 +5,11 @@ _by_imei: dict[str, dict] = {}
 _by_socket: dict[int, str] = {}
 _lock = threading.RLock()
 
+# When the most recent valid, authenticated packet arrived from ANY device.
+# Process-wide on purpose: services/health_service.py uses it to tell "quiet" from
+# "nothing is arriving at all". None until the first packet after start-up.
+_last_packet_at: datetime | None = None
+
 
 def register_device(imei: str, ip: str, device_id: str, conn, protocol: str = "GT06") -> None:
     with _lock:
@@ -46,6 +51,18 @@ def update_last_seen(imei: str) -> None:
         device = _by_imei.get(imei)
         if device:
             device["last_seen"] = datetime.now(timezone.utc)
+
+
+def mark_packet_received() -> None:
+    """Record that a valid packet just arrived from some device (gateway-wide)."""
+    global _last_packet_at
+    with _lock:
+        _last_packet_at = datetime.now(timezone.utc)
+
+
+def get_last_packet_at() -> datetime | None:
+    with _lock:
+        return _last_packet_at
 
 
 def get_socket(imei: str):

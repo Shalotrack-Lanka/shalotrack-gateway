@@ -3,7 +3,7 @@ import hmac
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from utils.logger import log
 from services.command_service import (
     send_where, send_status, send_version, send_imei, send_params,
@@ -17,6 +17,7 @@ from services.command_service import (
     UnsupportedCommandError,
 )
 from services.device_registry import get_all_devices
+from services.health_service import get_health
 
 COMMAND_API_PORT = int(os.environ.get("COMMAND_API_PORT", 9001))
 
@@ -65,6 +66,11 @@ def _run_async(coro, timeout: float = 5.0):
 
 class CommandAPIHandler(BaseHTTPRequestHandler):
 
+    # A client that connects and then goes quiet must not hold a handler thread
+    # forever. Applies to socket reads only; a command waiting on the device
+    # (_run_async, up to 5 s) is not affected.
+    timeout = 10
+
     def log_message(self, format, *args):
         log(f"[CommandAPI] {self.address_string()} — {format % args}")
 
@@ -91,7 +97,12 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/health":
-            self._send_json(200, {"status": "ok"})
+            # Real health, not a constant: event loop, database, pool, capacity and
+            # packet flow (see services/health_service.py). Still behind the key --
+            # this port is VPC-reachable, and VPC reachability is not authentication.
+            # 503 only when "down"; "degraded" is 200 so a poller still gets the body.
+            report = get_health(_loop)
+            self._send_json(503 if report["status"] == "down" else 200, report)
 
         elif self.path == "/devices":
             devices = get_all_devices()
@@ -271,7 +282,10 @@ def start_command_api():
             "who can reach this port, unauthenticated). GPS ingestion is unaffected.")
         return
 
-    server = HTTPServer(("0.0.0.0", COMMAND_API_PORT), CommandAPIHandler)
+    # Threading, not single-threaded: a deep /health check can take a few seconds
+    # when the database is slow, and one slow or stalled client must not block
+    # admin commands (or the next health poll) queued behind it.
+    server = ThreadingHTTPServer(("0.0.0.0", COMMAND_API_PORT), CommandAPIHandler)
     log(f"🌐 Command API listening on port {COMMAND_API_PORT}")
     server.serve_forever()
 

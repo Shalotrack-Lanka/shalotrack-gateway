@@ -8,6 +8,7 @@ from services.gps103_handler import process_gps103_message
 from services.device_registry import (
     get_device,
     get_imei_by_socket,
+    mark_packet_received,
     unregister_device,
     update_last_seen,
 )
@@ -123,6 +124,9 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if packet_imei:
                     imei = packet_imei
                     update_last_seen(imei)
+                    # Gateway-wide "something valid is arriving" timestamp --
+                    # feeds the silence check in services/health_service.py.
+                    mark_packet_received()
 
             try:
                 data = await asyncio.wait_for(reader.read(4096), timeout=CONNECTION_TIMEOUT)
