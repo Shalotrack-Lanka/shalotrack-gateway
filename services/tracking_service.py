@@ -82,7 +82,7 @@ async def mark_device_alive(device_id, heartbeat: bool = False):
     cannot pass "unknown" either.
 
     First contact (no DeviceStatuses row yet) inserts neutral defaults:
-    BatteryLevel 0, GpsSignal 0, PowerStatus 1 (normal). BatteryLevel 0 is a
+    BatteryLevel 0, GpsSignal 0, PowerStatus 0 (connected). BatteryLevel 0 is a
     placeholder meaning "not reported" -- see docs/multi-protocol.md.
     """
     now = datetime.now(timezone.utc)
@@ -91,7 +91,7 @@ async def mark_device_alive(device_id, heartbeat: bool = False):
             """
             INSERT INTO "DeviceStatuses"
             ("DeviceId","IsOnline","LastHeartbeat","LastSeen","GpsSignal","BatteryLevel","IgnitionStatus","MovementStatus","PowerStatus","UpdatedAt")
-            VALUES ($1, TRUE, $2, $3, 0, 0, FALSE, FALSE, 1, $3)
+            VALUES ($1, TRUE, $2, $3, 0, 0, FALSE, FALSE, 0, $3)
             ON CONFLICT ("DeviceId") DO UPDATE SET
                 "IsOnline"      = TRUE,
                 "LastHeartbeat" = COALESCE(EXCLUDED."LastHeartbeat", "DeviceStatuses"."LastHeartbeat"),
@@ -114,7 +114,7 @@ async def set_ignition(device_id, ignition_status: bool):
             """
             INSERT INTO "DeviceStatuses"
             ("DeviceId","IsOnline","LastHeartbeat","LastSeen","GpsSignal","BatteryLevel","IgnitionStatus","MovementStatus","PowerStatus","UpdatedAt")
-            VALUES ($1, TRUE, NULL, $2, 0, 0, $3, FALSE, 1, $2)
+            VALUES ($1, TRUE, NULL, $2, 0, 0, $3, FALSE, 0, $2)
             ON CONFLICT ("DeviceId") DO UPDATE SET
                 "IgnitionStatus" = EXCLUDED."IgnitionStatus",
                 "LastSeen"       = EXCLUDED."LastSeen",

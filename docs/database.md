@@ -82,7 +82,7 @@ Connection is established per-call via `database.get_db_connection()`, which rea
 | `BatteryLevel` | From status/heartbeat terminal info |
 | `IgnitionStatus` | From status/heartbeat terminal info bit `0x02` |
 | `MovementStatus` | Set to ignition status as a proxy — status/heartbeat packets carry no speed field |
-| `PowerStatus` | `1` if not power-cut, `2` if power-cut (derived from terminal info bit `0x80`) |
+| `PowerStatus` | `0` = connected, `1` = disconnected (power-cut), matching the API's `PowerStatus` enum (derived from terminal info bit `0x80`). Before Nov 2026 the gateway wrote `1` / `2`, which the API read as Disconnected / (nothing): every healthy device showed "Disconnected". |
 | `UpdatedAt` | `NOW()` |
 
 > Two unused duplicate read/write implementations for this table exist in the codebase: `repositories/status_repository.py::StatusRepository` and `services/state_change_service.py::StatusRepository`. Both are fully-formed but never imported by anything else — `tracking_service.py`'s plain functions are the ones actually used.

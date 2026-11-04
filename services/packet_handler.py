@@ -21,6 +21,7 @@ from repositories.raw_packet_repository import RawPacketRepository
 from services.event_service import create_event
 from constants.event_types import EventType
 from constants.severity import Severity
+from constants.power_status import POWER_CONNECTED, POWER_DISCONNECTED
 from decoders.information_decoder import decode_information
 from utils.logger import log
 
@@ -193,7 +194,7 @@ async def process_packet(data, writer, addr):
                     gps_signal=status["gsm_signal"],
                     ignition_status=status["ignition_status"],
                     movement_status=status["ignition_status"],
-                    power_status=1 if not status["power_cut"] else 2
+                    power_status=POWER_DISCONNECTED if status["power_cut"] else POWER_CONNECTED
                 )
                 log(f"Battery: {status['battery_level']}")
                 log(f"Signal: {status['gsm_signal']}")
@@ -217,7 +218,7 @@ async def process_packet(data, writer, addr):
                     gps_signal=heartbeat["gsm_signal"],
                     ignition_status=heartbeat["ignition_status"],
                     movement_status=heartbeat["ignition_status"],
-                    power_status=1 if not heartbeat["power_cut"] else 2
+                    power_status=POWER_DISCONNECTED if heartbeat["power_cut"] else POWER_CONNECTED
                 )
                 await update_heartbeat(device["device_id"])
                 log("💓 Heartbeat Updated")
