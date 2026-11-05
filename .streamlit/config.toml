@@ -1,0 +1,20 @@
+[server]
+headless = true
+# Loopback by default. The container image overrides this (see Dockerfile); the app refuses
+# to run unauthenticated on anything but loopback.
+address = "127.0.0.1"
+port = 8501
+enableXsrfProtection = true
+enableCORS = true
+maxUploadSize = 1
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"
+showErrorDetails = "none"
+
+[global]
+developmentMode = false
