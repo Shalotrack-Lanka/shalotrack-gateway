@@ -1,8 +1,13 @@
+# Python
+venv/
 __pycache__/
 *.pyc
+
+# Environment
 .env
-.env.*
-!.env.example
-.pytest_cache/
-.venv/
-venv/
+
+# VS Code
+.vscode/
+
+# AWS Keys
+*.pem
