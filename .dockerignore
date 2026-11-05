@@ -1,2 +1,0 @@
-# The gateway image must not contain the console (see console/README.md)
-console/
