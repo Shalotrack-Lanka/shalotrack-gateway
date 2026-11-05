@@ -1,86 +1,363 @@
-# ShaloTrack Gateway Console
+# ShaloTrack Gateway
 
-A **read-only** Streamlit operations view of the TCP gateway: health, connected devices, and the command catalogue. It talks only to the gateway's Command API (`GET /health`, `/devices`, `/commands`). It cannot send a command to a device and has no database access.
+*Lead Architect & Platform Engineer: Suwen Jayathunga — ShaloTrack Lanka*
 
-| Tab | Shows |
+A production-hardened Python TCP gateway that receives, parses, and acknowledges packets from GT06/V5-protocol GPS trackers, persists them to PostgreSQL via a thread-safe connection pool, and exposes an HTTP command API for sending remote commands to connected devices.
+
+This service sits between physical GPS trackers (installed in vehicles) and the rest of the ShaloTrack platform (API, database, mobile app):
+
+```
+GPS Tracker (V5 / GT06)
+        │  TCP, port 9000
+        ▼
+ShaloTrack Gateway  ◄── this repository
+        │  psycopg2 (connection pool)
+        ▼
+PostgreSQL (Supabase)
+        ▲
+        │
+ShaloTrack API (ASP.NET Core)  ←── HTTP command API (port 9001)
+```
+
+---
+
+## Features
+
+- TCP server accepting concurrent device connections, one thread per connection
+- Parses GT06/V5 binary packets in both `7878` (short frame) and `7979` (long frame) formats
+- Full protocol support: Login, GPS Location, Status, Heartbeat, Alarm, Information, Command ACK, Command Text Response, and Configuration packets — all parsed, persisted, and ACK'd
+- Thread-safe PostgreSQL connection pool (psycopg2 `ThreadedConnectionPool`) with retry-on-exhaustion — no dropped logins under burst reconnects
+- Admin-allowlist device security — only devices pre-registered in `SetupShalotrackDevices` with `Status = 'Activated'` are accepted; unknown or non-activated IMEIs are rejected and logged
+- Per-connection IMEI routing via an O(1) reverse socket lookup registry — every packet is correctly attributed to its device regardless of fleet size
+- Force-close on unregistered sockets — devices that reconnect without sending a login packet are immediately disconnected, forcing a clean re-login
+- Auto-registration of newly activated devices into `GpsDevices` on first login, with race-condition safety (`ON CONFLICT DO NOTHING`)
+- Alarm events fully persisted to `DeviceEvents` with severity classification and structured metadata (alarm type, coordinates, battery, signal, ignition state)
+- Protocol 94 (Information) and 6e (Configuration) fully decoded through the sub-field decoder pipeline and persisted as `DEVICE_INFORMATION` / `DEVICE_CONFIGURATION` events
+- HTTP Command API on port 9001 — internal VPC-only endpoint for the C# API to send commands to connected devices without SSH or console access
+- Dockerized for deployment on AWS EC2 with ECR image management and SSM-parameter-driven configuration
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
 |---|---|
-| Overview | OK / degraded / down banner with the gateway's own reasons, devices connected, last valid packet, uptime, DB latency, per-check table, raw report |
-| Devices | Connected devices (IMEI, protocol, IP, state, last packet, connected for), longest-silent first, search and filters |
-| Commands | The gateway's command list grouped by impact. Sending is deliberately not here: the Admin portal does it with role checks and an audit trail |
+| Language | Python 3.11 |
+| Networking | Raw TCP sockets (`socket`, `threading`) |
+| Database | PostgreSQL via `psycopg2-binary` (ThreadedConnectionPool) |
+| Config | Environment variables via `python-dotenv` + AWS SSM Parameter Store |
+| Deployment | Docker, AWS ECR, AWS EC2, GitHub Actions CI/CD |
 
-## Where it lives (and why not `gateway.shalotrack.com:8000`)
+---
 
-`gateway.shalotrack.com` is a DNS-only record to the NLB, and port **8000 is the raw TCP listener for GPS devices**. Cloudflare does not proxy HTTP on port 8000, and a browser request there would reach the GPS parser, not this app. Use its own hostname, for example `console.shalotrack.com`, through **Cloudflare Tunnel + Cloudflare Access** (free tier, no inbound ports, no ALB changes):
+## Installation
 
+**Requirements:** Python 3.11+, PostgreSQL, Docker (optional).
+
+```bash
+git clone https://github.com/Shalotrack-Lanka/shalotrack-gateway.git
+cd shalotrack-gateway
+pip install -r requirements.txt
 ```
-browser ──HTTPS──> Cloudflare (Access: SSO/OTP login) ──tunnel──> cloudflared ──> console :8501 ──HTTP + key──> gateway :8001 (VPC)
+
+Create a `.env` file in the project root:
+
+```env
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+PORT=9000
+CONNECTION_TIMEOUT=300
+MAX_CONNECTIONS=500
+DB_POOL_MIN=5
+DB_POOL_MAX=60
+LOW_BATTERY_THRESHOLD=2
+OVERSPEED_THRESHOLD=80
 ```
 
-## Security model
+---
 
-1. **Access** authenticates the person (identity provider, short session, MFA at the IdP).
-2. **The app re-verifies** the `Cf-Access-Jwt-Assertion` JWT itself: RS256 only, signature against the team's published keys, audience = this Access application, issuer, expiry, and the email must be on `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`. Missing or invalid means no page and **no gateway request**.
-3. **Fails closed.** Bad or missing configuration shows a generic error. `CONSOLE_AUTH=none` (local development) needs `CONSOLE_ALLOW_INSECURE_NO_AUTH=1` and is refused unless the server is bound to loopback, so the container image can never run unauthenticated.
-4. **Read-only by construction.** The client has one HTTP verb (GET) and a three-path allow-list; a test fails if a write verb is ever added. Redirects are never followed (they would resend the key).
-5. **Secrets.** `COMMAND_API_KEY` comes from the environment (SSM SecureString in production), is excluded from `repr`, errors, logs and the UI. Gateway failures are reduced to a small set of messages: no hostnames, tracebacks or response bodies reach the browser.
-6. **Load protection.** All viewers share one cached read (health 10 s, devices 5 s), including failures, so ten open tabs cause one request per interval and a gateway outage cannot turn into a pile of timeouts.
-7. **Container.** Non-root (uid 10001), read-only code, pinned dependencies, healthcheck.
+## Running the Gateway
 
-Known limit: the Command API has **one all-or-nothing key**, so this console's key could also call `POST /command`. The console never does, but a compromised console host could. The proper fix is a GET-only key on the gateway (`COMMAND_API_READ_KEY`); until then keep the console on its own host with no inbound ports.
+```bash
+python tcp_server.py
+```
 
-## Configuration
+This starts:
+- The TCP server on `0.0.0.0:9000` (or `$PORT`)
+- The HTTP Command API on `0.0.0.0:9001` (or `$COMMAND_API_PORT`)
+- A background console thread (disabled automatically in headless/Docker environments)
 
-| Variable | Required | Meaning |
+### Docker
+
+```bash
+docker build -t shalotrack-gateway .
+docker run \
+  -p 8000:9000 \
+  -p 8001:9001 \
+  -e DATABASE_URL=... \
+  -e CONNECTION_TIMEOUT=300 \
+  -e MAX_CONNECTIONS=500 \
+  -e DB_POOL_MIN=5 \
+  -e DB_POOL_MAX=60 \
+  shalotrack-gateway
+```
+
+---
+
+## HTTP Command API
+
+The gateway exposes a lightweight internal HTTP API on port 9001. This allows the C# API to send commands to connected devices without requiring direct socket access.
+
+**Base URL (internal VPC only):** `http://10.0.4.175:8001`
+
+### Endpoints
+
+#### `GET /health`
+Returns `200 OK` if the API is running.
+
+#### `GET /devices`
+Returns the list of currently connected and authenticated devices.
+
+```json
+{
+  "connected_devices": [
+    {
+      "imei": "869925074406321",
+      "device_id": "564d7347-...",
+      "ip": "212.104.228.97",
+      "connected_at": "2026-08-24T13:09:54.968342+00:00",
+      "last_seen": "2026-08-24T13:09:57.478757+00:00"
+    }
+  ],
+  "count": 1
+}
+```
+
+#### `GET /commands`
+Returns the full list of supported command names.
+
+#### `POST /command`
+Sends a command to a connected device.
+
+**Simple commands (no params):**
+```json
+{ "imei": "869925074406321", "command": "where" }
+```
+
+**Parametrised commands:**
+```json
+{
+  "imei": "869925074406321",
+  "command": "timer",
+  "params": { "t1": 20, "t2": 300 }
+}
+```
+
+**Supported commands:**
+
+| Command | Description | Params |
 |---|---|---|
-| `GATEWAY_URL` | yes | `http://gateway.shalotrack.internal:8001` (scheme://host:port only) |
-| `COMMAND_API_KEY` | yes | The gateway's shared key |
-| `CF_ACCESS_TEAM_DOMAIN` | yes | `<team>.cloudflareaccess.com` |
-| `CF_ACCESS_AUD` | yes | The Access application's AUD tag |
-| `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` | at least one | Second lock behind Access |
-| `REFRESH_SECONDS` | no | 5 to 300, default 10 |
-| `CONSOLE_TZ` | no | Default `Asia/Colombo` |
+| `where` | Request current GPS location | — |
+| `status` | Request device status | — |
+| `version` | Request firmware version | — |
+| `imei` | Request IMEI | — |
+| `params` | Request all parameters | — |
+| `gprsset` | Query GPRS settings | — |
+| `reset` | Reboot the device | — |
+| `relay_on` | Restore engine relay | — |
+| `relay_off` | Cut engine relay | — |
+| `sos_delete` | Delete SOS numbers | — |
+| `timer` | Set upload interval | `t1` (moving, seconds), `t2` (stopped, seconds) |
+| `distance` | Set distance interval | `meters` |
+| `speed_alarm` | Configure overspeed alarm | `enabled`, `interval`, `limit_kmh`, `sms` |
+| `moving_alarm` | Configure movement alarm | `enabled`, `radius_m`, `sms` |
+| `fence_circle` | Set circular geofence | `enabled`, `lat`, `lon`, `radius_100m`, `trigger`, `sms` |
+| `sos_add` | Set SOS phone numbers | `phone1`, `phone2`, `phone3` |
+| `apn` | Set APN | `apn_name`, `user`, `pwd` |
+| `server` | Set server address | `domain_or_ip`, `port`, `use_domain`, `udp` |
+| `batalm` | Low battery alarm | `enabled`, `sms` |
+| `poweralm` | Power cut alarm | `enabled`, `sms` |
 
-See `.env.example`.
+---
 
-## Deploy (Cloudflare Tunnel + Access)
+## Device Security
 
-1. **Host.** A small instance in the VPC that can reach `gateway.shalotrack.internal:8001`. Streamlit needs a few hundred MB of RAM, so choose a micro-class instance. Security group: **no inbound rules**; outbound 443 (Cloudflare, ECR, SSM) and 8001 to the gateway. Prefer a dedicated instance over sharing the Admin one, because the key can control vehicles.
-2. **Access application.** Zero Trust, Access, Applications, Self-hosted: hostname `console.shalotrack.com`; policy Allow with the staff emails; session duration short (for example 8 h). Note the **AUD tag** and your **team domain**.
-3. **Tunnel.** Zero Trust, Networks, Tunnels, create `gateway-console`; public hostname `console.shalotrack.com` to `http://localhost:8501`; run `cloudflared` with the tunnel token on the same host.
-4. **SSM.** Store `COMMAND_API_KEY` and the Access values as SecureString parameters.
-5. **Run** (example):
+Only devices pre-registered by an admin are accepted. The login flow:
 
-```bash
-docker run -d --name gateway-console --restart unless-stopped \
-  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --memory 512m \
-  -p 127.0.0.1:8501:8501 \
-  -e GATEWAY_URL=http://gateway.shalotrack.internal:8001 \
-  -e COMMAND_API_KEY="$(aws ssm get-parameter --name /shalotrack/prod/gateway-console/command_api_key --with-decryption --query Parameter.Value --output text)" \
-  -e CF_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com -e CF_ACCESS_AUD=<aud> \
-  -e ALLOWED_EMAIL_DOMAINS=shalotrack.com \
-  <ecr>/gateway-console:<tag>
+```
+Device connects → sends Login packet (IMEI)
+        │
+        ▼
+Check GpsDevices (already registered?) → YES → accept immediately
+        │ NO
+        ▼
+Check SetupShalotrackDevices (Status = 'Activated'?) → NO → reject, close connection
+        │ YES
+        ▼
+Auto-create GpsDevices record → accept
+        │
+        ▼
+Device sends packets → gateway saves GPS, status, alarms to DB
 ```
 
-6. **Verify.** Opening the hostname must show the Access login; after login, the Overview. `curl` to the hostname without Access must never return the app. The origin port must not be reachable from anywhere except loopback.
+Devices with `Status != 'Activated'` (Not Activated, Temporarily Stopped, Cancelled) are rejected regardless of IMEI existence.
 
-## Develop and test
+---
 
-```bash
-pip install -r requirements-dev.txt
-python -m pytest -q                       # unit + app tests (fake gateway)
+## Folder Structure
 
-# try the UI locally, no gateway needed
-python -m tests.fake_gateway --scenario degraded --port 8001 --key dev-key &
-GATEWAY_URL=http://127.0.0.1:8001 COMMAND_API_KEY=dev-key \
-CONSOLE_AUTH=none CONSOLE_ALLOW_INSECURE_NO_AUTH=1 streamlit run app.py
+```
+shalotrack-gateway/
+├── tcp_server.py              # Entry point: socket accept loop, connection cap, per-connection thread
+├── command_api.py             # HTTP Command API (port 9001) — internal VPC only
+├── console.py                 # Interactive console (disabled in headless/Docker environments)
+├── config.py                  # Environment-driven configuration
+├── database.py                # Thread-safe PostgreSQL connection pool with retry-on-exhaustion
+│
+├── protocols/
+│   └── detect.py              # Per-connection protocol detection (first bytes) -> GT06 / GPS103
+│
+├── parsers/
+│   ├── v5_parser.py           # All GT06/V5 packet parsing + CRC16-X25 + ACK building
+│   └── gps103_parser.py       # GPS103 (TK103A/B) framing + text parsing (pure functions)
+│
+├── decoders/                  # Protocol 0x94 / 0x6e Information packet sub-field decoders
+│   ├── information_decoder.py     (orchestrator)
+│   ├── alarm_decoder.py
+│   ├── device_settings_decoder.py
+│   ├── geofence_decoder.py
+│   ├── gps_decoder.py
+│   ├── network_decoder.py
+│   ├── phone_decoder.py
+│   └── sim_decoder.py
+│
+├── services/
+│   ├── packet_handler.py      # GT06 dispatcher: protocol detection → parse → save → ACK
+│   ├── gps103_handler.py      # GPS103 dispatcher: login / heartbeat / position / alarms
+│   ├── device_registry.py     # Thread-safe in-memory registry (IMEI → socket, O(1) reverse lookup)
+│   ├── command_service.py     # Sends remote commands to connected device sockets
+│   ├── tracking_service.py    # Writes GPS/status/heartbeat data to PostgreSQL
+│   ├── event_service.py       # Writes device events (online, alarms, config) to PostgreSQL
+│   └── command_response_service.py  # Handles device text responses to commands
+│
+├── repositories/
+│   ├── device_repository.py       # IMEI allowlist check, auto-registration, vehicle lookup
+│   ├── raw_packet_repository.py   # Persists raw hex packets
+│   └── command_response_repository.py  # Persists command responses
+│
+├── constants/
+│   ├── protocol_numbers.py    # Protocol byte → name enum
+│   ├── event_types.py         # Device event type enum
+│   └── severity.py            # Event severity enum
+│
+├── models/
+│   └── command_response.py    # Command response dataclass
+│
+├── utils/
+│   ├── command_builder.py     # Builds all GT06 command packets (WHERE, RESET, RELAY, TIMER, FENCE, ...)
+│   ├── packet_buffer.py       # TCP fragmentation handler — assembles complete GT06 frames from stream
+│   └── logger.py              # Timestamped console logger
+│
+├── test/                      # Manual test scripts
+└── docs/                      # Protocol and architecture documentation
 ```
 
-`tests/test_contract_real_gateway.py` boots the real gateway handler (no database) and is skipped unless the gateway repo is available:
-`GATEWAY_REPO=../shalotrack-gateway GATEWAY_PYTHON=<python with gateway requirements> python -m pytest tests/test_contract_real_gateway.py`.
-It also fails if the gateway adds a command the console has not classified, so new commands are never silently mislabelled.
+---
 
-## Limits
+## Packet Flow
 
-- Point-in-time view: no history (that needs a database role, which this app intentionally does not have).
-- IMEIs and device IPs are shown to allow-listed staff.
-- State is in memory; restarting the console loses nothing important.
+```
+Tracker connects
+      │
+      ▼
+tcp_server.py: handle_device()
+      │  Connection cap check (semaphore, max 500)
+      │  conn.recv(4096) + packet_buffer.extract_packets()
+      ▼
+services/packet_handler.py: process_packet()
+      │
+      ├─► Detect frame type (7878 / 7979) and protocol byte
+      ├─► Dispatch by protocol:
+      │       ├─ 01      → parse_login_packet() → allowlist check → register_device() → DEVICE_ONLINE event
+      │       ├─ 12 / 22 → parse_location_packet() → save_tracking() → update_current_location()
+      │       ├─ 13      → parse_status_packet() → update_device_status()
+      │       ├─ 23      → parse_heartbeat_packet() → update_device_status() → update_heartbeat()
+      │       ├─ 26      → parse_alarm_packet() → create_event() with severity + metadata
+      │       ├─ 94      → parse_information_packet() → decode_information() → create_event()
+      │       ├─ 8a      → command ACK logged with echoed protocol + serial
+      │       ├─ 21      → parse_command_response() → handle_command_response()
+      │       └─ 6e      → parse_information_packet() → decode_information() → DEVICE_CONFIGURATION event
+      ├─► Unknown socket (no prior login) → force-close connection → device must reconnect and login
+      ├─► Every branch saves raw hex packet via RawPacketRepository
+      └─► build_ack() + conn.send() — ALWAYS executes regardless of branch outcome
+```
+
+---
+
+## Supported Device Families
+
+One TCP port serves several families; the family is detected from each connection's first bytes. Details, field rules and the verification checklist are in [`docs/multi-protocol.md`](docs/multi-protocol.md).
+
+| Family | Devices | Status |
+|---|---|---|
+| `GT06` | V5 (2G) | Production |
+| `GPS103` | TK103A/B (Coban family) | Inbound only: login, heartbeat, position, alarms. Commands return `501`. Not yet verified on hardware. |
+
+## Supported Protocols (GT06)
+
+| Code | Name | Status |
+|---|---|---|
+| `01` | Login | ✅ Parsed, allowlist-checked, device registered, DEVICE_ONLINE event |
+| `12` / `22` | GPS Location | ✅ Parsed, saved to GpsTrackings + CurrentLocations |
+| `13` | Status | ✅ Parsed, DeviceStatuses updated |
+| `23` | Heartbeat | ✅ Parsed, DeviceStatuses + LastHeartbeat updated |
+| `26` | Alarm | ✅ Parsed, persisted to DeviceEvents with severity + full metadata |
+| `94` | Information | ✅ Parsed, fully decoded via sub-field pipeline, persisted to DeviceEvents |
+| `8a` | Command ACK | ✅ Parsed, echoed protocol + serial logged |
+| `21` | Command Text Response | ✅ Parsed, saved to CommandResponses |
+| `6e` | Configuration | ✅ Parsed, fully decoded via sub-field pipeline, persisted as DEVICE_CONFIGURATION event |
+
+---
+
+## Production Architecture
+
+```
+Internet
+    │
+    ▼
+AWS NLB (port 8000) ──► Gateway EC2 (t3.small)
+                              │ port 8000 → container:9000 (TCP devices)
+                              │ port 8001 → container:9001 (HTTP command API, VPC-internal only)
+                              │
+                         Docker container
+                              │
+                         Supabase DB1
+                       (GPS telemetry)
+```
+
+**Configuration via AWS SSM Parameter Store:**
+
+| Parameter | Value |
+|---|---|
+| `/shalotrack/prod/gateway/database_url` | Supabase session pooler URL (port 5432) |
+| `/shalotrack/prod/gateway/connection_timeout` | `300` |
+| `/shalotrack/prod/gateway/max_connections` | `500` |
+| `/shalotrack/prod/gateway/db_pool_min` | `5` |
+| `/shalotrack/prod/gateway/db_pool_max` | `60` |
+
+---
+
+## Known Limitations
+
+- **Thread-per-connection model**: The current architecture spawns one OS thread per connected device. This is production-appropriate for the current fleet size (up to ~500 devices) but will need to be replaced with an `asyncio`-based event loop for the 25,000-device target. Planned post-launch.
+- **No packet buffering during downtime**: If the gateway restarts, packets sent by devices during the restart window (~10 seconds for container restart, ~2 minutes for instance replacement) are permanently lost — the V5 device does not buffer and retransmit missed packets. Mitigated by using container restart (not instance termination) for deployments.
+- **Some V5 firmware skips login on reconnect**: Certain device batches send GPS/status packets without re-sending a login packet after a TCP drop. The gateway handles this by force-closing the connection, which causes the device to reconnect and send login correctly. Adds ~5-10 seconds of delay on reconnect.
+- **No duplicate packet detection**: If a device retransmits a packet, it will be saved twice in `GpsTrackings`. Minor data quality issue with no operational impact.
+- **Southern/Western hemisphere coordinates**: `v5_parser.py` decodes hemisphere bits but the sign correction is not applied. ShaloTrack currently operates in Sri Lanka (North/East) so this has no operational impact.
+
+---
+
+
+
+**Investor & Owner:** Polwatte Gedara Nuwan Aloka
+
+**Legal Entity:** ShaloTrack (Pvt) Ltd.
