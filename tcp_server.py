@@ -14,7 +14,7 @@ from services.device_registry import (
 )
 from protocols import GT06, GPS103, detect_protocol
 from services.tracking_service import set_device_offline
-from utils.logger import log
+from utils.logger import log, debug
 from console import start_console
 from utils.packet_buffer import extract_packets
 from parsers.gps103_parser import extract_messages
@@ -118,7 +118,7 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 if writer.is_closing():
                     break
 
-                log(f"RAW DATA: {packet.hex()}")
+                debug(f"RAW DATA: {packet.hex()}")
                 packet_imei = await handle_frame(packet, writer, addr)
 
                 if packet_imei:

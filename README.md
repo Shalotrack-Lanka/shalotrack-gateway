@@ -71,6 +71,11 @@ DB_POOL_MIN=5
 DB_POOL_MAX=60
 LOW_BATTERY_THRESHOLD=2
 OVERSPEED_THRESHOLD=80
+# Optional load / cost controls (defaults shown), see docs/performance-tuning.md
+LOG_LEVEL=DEBUG                 # DEBUG | INFO | WARNING | ERROR
+RAW_PACKET_MODE=selective       # all | selective | off
+RAW_PACKET_SAMPLE_RATE=0.02     # share of routine packets kept when selective
+GPS_TRACKING_IDEMPOTENT=false   # true only after the unique index exists (docs/gps-tracking-idempotency.md)
 ```
 
 ---

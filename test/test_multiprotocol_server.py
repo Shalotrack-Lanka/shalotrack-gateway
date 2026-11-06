@@ -81,13 +81,11 @@ class ServerTestCase(unittest.IsolatedAsyncioTestCase):
             "vehicle": patch.object(DeviceRepository, "get_vehicle_by_device", return_value=VEHICLE_ID),
             "raw": patch.object(RawPacketRepository, "save"),
             "event_g103": patch("services.gps103_handler.create_event", new_callable=AsyncMock),
-            "track_g103": patch("services.gps103_handler.save_tracking", new_callable=AsyncMock),
-            "current_g103": patch("services.gps103_handler.update_current_location", new_callable=AsyncMock),
+            "track_g103": patch("services.gps103_handler.save_location", new_callable=AsyncMock),
             "alive": patch("services.gps103_handler.mark_device_alive", new_callable=AsyncMock),
             "ignition": patch("services.gps103_handler.set_ignition", new_callable=AsyncMock),
             "event_gt06": patch("services.packet_handler.create_event", new_callable=AsyncMock),
-            "track_gt06": patch("services.packet_handler.save_tracking", new_callable=AsyncMock),
-            "current_gt06": patch("services.packet_handler.update_current_location", new_callable=AsyncMock),
+            "track_gt06": patch("services.packet_handler.save_location", new_callable=AsyncMock, return_value=True),
             "offline": patch("tcp_server.set_device_offline", new_callable=AsyncMock),
         }
         for name, patcher in patches.items():
@@ -169,8 +167,8 @@ class Gps103FlowTests(ServerTestCase):
         self.assertAlmostEqual(kwargs["speed"], 18.52, places=2)       # 10 knots -> km/h
         self.assertEqual(kwargs["event_time"], datetime(2026, 10, 13, 9, 0, 12, tzinfo=timezone.utc))
         self.assertEqual(kwargs["satellites"], 0)
-        await self.until(lambda: self.mocks["current_g103"].await_count == 1)
-        self.assertEqual(self.mocks["current_g103"].call_args.kwargs["vehicle_id"], VEHICLE_ID)
+        # The vehicle is resolved inside the SQL statement now, not passed in.
+        self.assertNotIn("vehicle_id", kwargs)
 
     async def test_two_messages_in_one_segment_are_both_processed(self):
         _, writer = await self.login()
@@ -228,6 +226,31 @@ class Gps103FlowTests(ServerTestCase):
         await self.until(lambda: any(
             c.kwargs.get("event_type") == "SOS" for c in self.mocks["event_g103"].await_args_list
         ))
+
+    async def test_raw_packets_are_kept_for_login_and_alarms_but_routine_positions_are_sampled_out(self):
+        import config
+        with patch.object(config, "RAW_PACKET_MODE", "selective"), patch.object(config, "RAW_PACKET_SAMPLE_RATE", 0.0):
+            reader, writer = await self.login()                       # login: always stored
+            await self.until(lambda: self.mocks["raw"].await_count == 1)
+
+            writer.write(tracker())                                   # routine position: sampled out
+            await writer.drain()
+            await self.until(lambda: self.mocks["track_g103"].await_count == 1)
+            self.assertEqual(self.mocks["raw"].await_count, 1)
+
+            writer.write(tracker("help me"))                          # alarm: always stored
+            await writer.drain()
+            await self.read(reader)                                   # SOS ack
+            await self.until(lambda: self.mocks["raw"].await_count == 2)
+
+    async def test_position_report_does_not_look_up_the_vehicle_separately(self):
+        # The vehicle is resolved inside the save_location statement; only alarms need the lookup.
+        _, writer = await self.login()
+        self.mocks["vehicle"].reset_mock()
+        writer.write(tracker())
+        await writer.drain()
+        await self.until(lambda: self.mocks["track_g103"].await_count == 1)
+        self.mocks["vehicle"].assert_not_awaited()
 
 
 class Gps103SecurityTests(ServerTestCase):

@@ -44,6 +44,36 @@ DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "5"))
 DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "150"))
 
 # ================================================================
+# Cost / load controls (all safe defaults: behaviour only changes when an
+# env var is set, except RAW_PACKET_MODE, see below)
+# ================================================================
+# RawPackets stores the hex of packets forever. Storing EVERY packet makes
+# that table outgrow GpsTrackings, so by default only the packets that matter
+# for debugging are kept:
+#   all       -> every packet (old behaviour)
+#   selective -> always: login, alarms/SOS, information/config, command
+#                replies, unknown packets.  Routine packets (position, status,
+#                heartbeat) are sampled at RAW_PACKET_SAMPLE_RATE.
+#   off       -> nothing is stored
+RAW_PACKET_MODE = os.getenv("RAW_PACKET_MODE", "selective").strip().lower()
+try:
+    RAW_PACKET_SAMPLE_RATE = min(1.0, max(0.0, float(os.getenv("RAW_PACKET_SAMPLE_RATE", "0.02"))))
+except ValueError:
+    RAW_PACKET_SAMPLE_RATE = 0.02
+
+# When "true", a position that was already stored (same DeviceId + EventTime,
+# e.g. a retransmission after a reconnect) is silently ignored instead of
+# creating a duplicate row. REQUIRES the unique index on
+# GpsTrackings(DeviceId, EventTime) to exist first, see docs/gps-tracking-idempotency.md.
+# Leave "false" until that index is in the database.
+GPS_TRACKING_IDEMPOTENT = os.getenv("GPS_TRACKING_IDEMPOTENT", "false").strip().lower() == "true"
+
+# DEBUG (default, same output as before) | INFO | WARNING | ERROR.
+# Switch to INFO once there are hundreds of devices: per-packet detail lines
+# (about 12 per position packet) are what cost CPU and log-ingestion money.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").strip().upper()
+
+# ================================================================
 # Business logic thresholds
 # ================================================================
 LOW_BATTERY_THRESHOLD = int(os.getenv("LOW_BATTERY_THRESHOLD", "2"))
