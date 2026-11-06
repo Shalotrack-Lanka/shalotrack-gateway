@@ -1,6 +1,7 @@
 from database import managed_connection
 from datetime import datetime, timezone
 from utils.logger import log
+from config import GPS_TRACKING_IDEMPOTENT
 # Every float bound to a numeric column MUST go through clean_decimal — see
 # utils/numeric.py for the 2026-10-10 incident this prevents.
 from utils.numeric import clean_decimal as _clean_decimal
@@ -45,6 +46,72 @@ async def update_current_location(device_id, vehicle_id, latitude, longitude, sp
             device_id, vehicle_id, _clean_decimal(latitude), _clean_decimal(longitude),
             _clean_decimal(speed, 2), _clean_decimal(heading, 2), ignition_status, speed > 0, event_time
         )
+
+
+# One round trip per position packet.
+#
+# Before: INSERT GpsTrackings + SELECT vehicle + SELECT ignition + UPSERT
+# CurrentLocations = 4 pool borrows / 4-5 statements. Now a single statement:
+#   * the GpsTrackings insert is a data-modifying CTE (always executes),
+#   * the vehicle comes from the active DeviceAssignments row inside the same
+#     statement, so an unassigned device inserts nothing into CurrentLocations,
+#   * the ignition flag is read from DeviceStatuses inside the same statement.
+# Explicit casts are required: in INSERT ... SELECT an untyped $n would be
+# inferred as text and rejected by uuid / numeric columns.
+_SAVE_LOCATION_SQL = """
+WITH track AS (
+    INSERT INTO "GpsTrackings"
+        ("DeviceId","Latitude","Longitude","Altitude","Speed","Heading","Satellites","GpsAccuracy","EventTime","CreatedAt")
+    VALUES ($1::uuid, $2::numeric, $3::numeric, NULL, $4::numeric, $5::numeric, $6::int, NULL, $7::timestamptz, NOW())
+    {on_conflict}
+)
+INSERT INTO "CurrentLocations"
+    ("DeviceId","VehicleId","Latitude","Longitude","Speed","Heading","IgnitionStatus","MovementStatus","LastUpdate")
+SELECT $1::uuid, a."VehicleId", $2::numeric, $3::numeric, $4::numeric, $5::numeric,
+       COALESCE((SELECT s."IgnitionStatus" FROM "DeviceStatuses" s WHERE s."DeviceId" = $1::uuid), FALSE),
+       ($4::numeric > 0),
+       $7::timestamptz
+FROM (
+    SELECT "VehicleId" FROM "DeviceAssignments"
+    WHERE "DeviceId" = $1::uuid AND "Status" = 1
+    LIMIT 1
+) a
+ON CONFLICT ("DeviceId") DO UPDATE SET
+    "VehicleId"      = EXCLUDED."VehicleId",
+    "Latitude"       = EXCLUDED."Latitude",
+    "Longitude"      = EXCLUDED."Longitude",
+    "Speed"          = EXCLUDED."Speed",
+    "Heading"        = EXCLUDED."Heading",
+    "LastUpdate"     = EXCLUDED."LastUpdate",
+    "MovementStatus" = EXCLUDED."MovementStatus",
+    "IgnitionStatus" = EXCLUDED."IgnitionStatus"
+RETURNING "DeviceId"
+"""
+
+
+def build_save_location_sql(idempotent: bool) -> str:
+    on_conflict = 'ON CONFLICT ("DeviceId","EventTime") DO NOTHING' if idempotent else ""
+    return _SAVE_LOCATION_SQL.format(on_conflict=on_conflict)
+
+
+async def save_location(device_id, latitude, longitude, speed, heading, satellites, event_time) -> bool:
+    """
+    Store one position (history + live) in a single database round trip.
+
+    Returns True when the live position (CurrentLocations) was updated, False
+    when the device is not assigned to a vehicle (history is still stored).
+    Every float goes through clean_decimal, see utils/numeric.py.
+    """
+    sql = build_save_location_sql(GPS_TRACKING_IDEMPOTENT)
+    async with managed_connection() as conn:
+        updated = await conn.fetchval(
+            sql,
+            device_id,
+            _clean_decimal(latitude), _clean_decimal(longitude),
+            _clean_decimal(speed, 2), _clean_decimal(heading, 2),
+            satellites, event_time,
+        )
+    return updated is not None
 
 
 async def update_device_status(device_id, battery_level, gps_signal, ignition_status, movement_status, power_status):

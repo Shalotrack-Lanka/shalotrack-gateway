@@ -15,7 +15,8 @@ from parsers.v5_parser import (
 from parsers.command_response_parser import parse_command_response
 from services.command_response_service import handle_command_response
 from services.device_registry import register_device, get_device, get_imei_by_socket
-from services.tracking_service import save_tracking, update_current_location, update_device_status, update_heartbeat
+from services.tracking_service import save_location, update_device_status, update_heartbeat
+from services.raw_packet_policy import should_store_raw
 from repositories.device_repository import DeviceRepository
 from repositories.raw_packet_repository import RawPacketRepository
 from services.event_service import create_event
@@ -23,7 +24,7 @@ from constants.event_types import EventType
 from constants.severity import Severity
 from constants.power_status import POWER_CONNECTED, POWER_DISCONNECTED
 from decoders.information_decoder import decode_information
-from utils.logger import log
+from utils.logger import log, debug
 
 
 def _get_device(imei, writer=None):
@@ -41,12 +42,20 @@ def _get_device(imei, writer=None):
     return device
 
 
-async def _save_raw(device_id, protocol, hex_data):
+async def _save_raw(device_id, protocol, hex_data, always=False, parsed=True):
+    """
+    Store the packet's hex in RawPackets, subject to RAW_PACKET_MODE
+    (services/raw_packet_policy.py). always=True marks rare packets worth
+    keeping (login, alarms, config, command replies, unknown packets); routine
+    traffic (position, status, heartbeat) is sampled.
+    """
+    if not should_store_raw(always):
+        return
     await RawPacketRepository.save(
         device_id=device_id,
         protocol_number=protocol,
         raw_hex=hex_data,
-        parsed=True
+        parsed=parsed
     )
 
 
@@ -74,7 +83,7 @@ async def process_packet(data, writer, addr):
         log("❌ Invalid packet")
         return None
 
-    log(f"Protocol: {protocol}")
+    debug(f"Protocol: {protocol}")
     hex_data = raw.hex()
     current_imei = None
     connection_imei = get_imei_by_socket(writer)
@@ -97,7 +106,7 @@ async def process_packet(data, writer, addr):
             else:
                 log(f"✅ Authorised Device — IMEI: {login['imei']}")
                 register_device(login["imei"], addr[0], device_id, writer)
-                await _save_raw(device_id, protocol, hex_data)
+                await _save_raw(device_id, protocol, hex_data, always=True)
                 log(f"📱 IMEI: {login['imei']}")
                 log(f"🆔 Device ID: {device_id}")
                 log(f"🔢 Serial: {login['serial']}")
@@ -115,7 +124,7 @@ async def process_packet(data, writer, addr):
         # 0x12 / 0x22 — GPS LOCATION
         # ================================================================
         elif protocol in ["12", "22"]:
-            log("📍 LOCATION RECEIVED")
+            debug("📍 LOCATION RECEIVED")
             location = parse_location_packet(raw)
 
             # Physically impossible values must never reach the DB. This app has
@@ -144,16 +153,18 @@ async def process_packet(data, writer, addr):
                 log(f"🚨 REJECTED invalid location — lat={lat} lon={lon} speed={speed} heading={heading}")
                 current_imei = connection_imei
 
-            log(f"Latitude: {location['latitude']}")
-            log(f"Longitude: {location['longitude']}")
-            log(f"Speed: {location['speed']}")
-            log(f"Time: {location['timestamp']}")
-            log(f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}")
+            debug(f"Latitude: {location['latitude']}")
+            debug(f"Longitude: {location['longitude']}")
+            debug(f"Speed: {location['speed']}")
+            debug(f"Time: {location['timestamp']}")
+            debug(f"🗺 https://maps.google.com/?q={location['latitude']},{location['longitude']}")
 
             device = _get_device(connection_imei, writer) if location_valid else None
             if device:
-                await _save_raw(device["device_id"], protocol, hex_data)
-                await save_tracking(
+                await _save_raw(device["device_id"], protocol, hex_data)   # routine: sampled
+                # One database round trip: history row + live position
+                # (see tracking_service.save_location).
+                live_updated = await save_location(
                     device_id=device["device_id"],
                     latitude=location["latitude"],
                     longitude=location["longitude"],
@@ -162,28 +173,18 @@ async def process_packet(data, writer, addr):
                     satellites=location["satellites"],
                     event_time=location["timestamp"]
                 )
-                log("✅ GPS Tracking Saved")
-                vehicle_id = await DeviceRepository.get_vehicle_by_device(device["device_id"])
-                if vehicle_id:
-                    await update_current_location(
-                        device_id=device["device_id"],
-                        vehicle_id=vehicle_id,
-                        latitude=location["latitude"],
-                        longitude=location["longitude"],
-                        speed=location["speed"],
-                        heading=location["heading"],
-                        event_time=location["timestamp"]
-                    )
-                    log("✅ Current Location Updated")
+                debug("✅ GPS Tracking Saved")
+                if live_updated:
+                    debug("✅ Current Location Updated")
                 else:
-                    log("ℹ️ Device not assigned to a vehicle. Skipping CurrentLocation update.")
+                    debug("ℹ️ Device not assigned to a vehicle. Skipping CurrentLocation update.")
                 current_imei = connection_imei
 
         # ================================================================
         # 0x13 — STATUS
         # ================================================================
         elif protocol == "13":
-            log("⚡ Status Packet")
+            debug("⚡ Status Packet")
             device = _get_device(connection_imei, writer)
             if device:
                 status = parse_status_packet(raw)
@@ -196,18 +197,18 @@ async def process_packet(data, writer, addr):
                     movement_status=status["ignition_status"],
                     power_status=POWER_DISCONNECTED if status["power_cut"] else POWER_CONNECTED
                 )
-                log(f"Battery: {status['battery_level']}")
-                log(f"Signal: {status['gsm_signal']}")
-                log(f"Ignition: {status['ignition_status']}")
-                log(f"Power Cut: {status['power_cut']}")
-                log(f"Charging: {status['charging']}")
+                debug(f"Battery: {status['battery_level']}")
+                debug(f"Signal: {status['gsm_signal']}")
+                debug(f"Ignition: {status['ignition_status']}")
+                debug(f"Power Cut: {status['power_cut']}")
+                debug(f"Charging: {status['charging']}")
                 current_imei = connection_imei
 
         # ================================================================
         # 0x23 — HEARTBEAT
         # ================================================================
         elif protocol == "23":
-            log("💓 Heartbeat Packet")
+            debug("💓 Heartbeat Packet")
             device = _get_device(connection_imei, writer)
             if device:
                 heartbeat = parse_heartbeat_packet(raw)
@@ -221,7 +222,7 @@ async def process_packet(data, writer, addr):
                     power_status=POWER_DISCONNECTED if heartbeat["power_cut"] else POWER_CONNECTED
                 )
                 await update_heartbeat(device["device_id"])
-                log("💓 Heartbeat Updated")
+                debug("💓 Heartbeat Updated")
                 current_imei = connection_imei
 
         # ================================================================
@@ -232,7 +233,7 @@ async def process_packet(data, writer, addr):
             device = _get_device(connection_imei, writer)
             if device:
                 alarm = parse_alarm_packet(raw)
-                await _save_raw(device["device_id"], protocol, hex_data)
+                await _save_raw(device["device_id"], protocol, hex_data, always=True)
                 alarm_name = get_alarm_name(alarm["alarm_type"])
                 log(f"🚨 Alarm Type  : {alarm_name}")
                 log(f"Latitude       : {alarm['latitude']}")
@@ -282,7 +283,7 @@ async def process_packet(data, writer, addr):
             log("📡 Information Packet")
             device = _get_device(connection_imei, writer)
             if device:
-                await _save_raw(device["device_id"], protocol, hex_data)
+                await _save_raw(device["device_id"], protocol, hex_data, always=True)
                 info = parse_information_packet(raw)
                 if info["is_ascii"]:
                     log(f"ℹ️ Information (text): {info['text']}")
@@ -313,7 +314,7 @@ async def process_packet(data, writer, addr):
             log("📨 Command ACK Packet")
             device = _get_device(connection_imei, writer)
             if device:
-                await _save_raw(device["device_id"], protocol, hex_data)
+                await _save_raw(device["device_id"], protocol, hex_data, always=True)
                 if raw[0:2] == b"\x79\x79":
                     body_start = 5
                 else:
@@ -330,7 +331,7 @@ async def process_packet(data, writer, addr):
             log("📨 Command Text Response")
             device = _get_device(connection_imei, writer)
             if device:
-                await _save_raw(device["device_id"], protocol, hex_data)
+                await _save_raw(device["device_id"], protocol, hex_data, always=True)
                 response = parse_command_response(raw)
                 await handle_command_response(device["device_id"], connection_imei, response)
                 log(f"Command  : {response['command']}")
@@ -346,7 +347,7 @@ async def process_packet(data, writer, addr):
             log("⚙️ Configuration Packet")
             device = _get_device(connection_imei, writer)
             if device:
-                await _save_raw(device["device_id"], protocol, hex_data)
+                await _save_raw(device["device_id"], protocol, hex_data, always=True)
                 info = parse_information_packet(raw)
                 if info["is_ascii"]:
                     log(f"⚙️ Config (text): {info['text']}")
@@ -372,6 +373,9 @@ async def process_packet(data, writer, addr):
 
         else:
             _log_unknown(protocol, raw, hex_data)
+            unknown_device = get_device(connection_imei) if connection_imei else None
+            if unknown_device:
+                await _save_raw(unknown_device["device_id"], protocol, hex_data, always=True, parsed=False)
             try:
                 log(f"ASCII    : {raw.decode('ascii')}")
             except UnicodeDecodeError:
@@ -388,7 +392,7 @@ async def process_packet(data, writer, addr):
         ack = build_ack(raw)
         writer.write(ack)
         await writer.drain()
-        log(f"📤 ACK sent: {ack.hex().upper()}")
+        debug(f"📤 ACK sent: {ack.hex().upper()}")
     except Exception as ex:
         log(f"❌ ACK ERROR: {ex}")
 

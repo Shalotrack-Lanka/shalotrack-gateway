@@ -32,11 +32,11 @@ from repositories.raw_packet_repository import RawPacketRepository
 from services.device_registry import register_device, get_device, get_imei_by_socket
 from services.event_service import create_event
 from services.tracking_service import (
-    save_tracking,
-    update_current_location,
+    save_location,
     mark_device_alive,
     set_ignition,
 )
+from services.raw_packet_policy import should_store_raw
 from utils.logger import log
 
 DEFAULT_MODEL = "TK103"
@@ -77,7 +77,10 @@ async def _safely(label: str, coro) -> None:
         log(f"❌ {label} failed: {ex}")
 
 
-async def _save_raw(device_id, raw: bytes) -> None:
+async def _save_raw(device_id, raw: bytes, always: bool = False) -> None:
+    """Subject to RAW_PACKET_MODE (services/raw_packet_policy.py)."""
+    if not should_store_raw(always):
+        return
     await RawPacketRepository.save(
         device_id=device_id,
         protocol_number=GPS103,
@@ -153,7 +156,7 @@ async def _handle_login(text, raw, writer, addr):
     # bookkeeping after. Nothing below may stop the reply or the registration.
     await _send(writer, p.LOGIN_REPLY)
 
-    await _safely("raw packet save", _save_raw(device_id, raw))
+    await _safely("raw packet save", _save_raw(device_id, raw, always=True))
     await _safely("mark online", mark_device_alive(device_id))
     try:
         vehicle_id = await DeviceRepository.get_vehicle_by_device(device_id)
@@ -227,13 +230,18 @@ async def _handle_tracker(text, raw, writer):
     if alarm == "SOS":
         await _send(writer, p.build_help_me_ack(imei))
 
-    await _safely("raw packet save", _save_raw(device_id, raw))
+    # Alarms and unknown keywords are worth keeping; routine reports are sampled.
+    await _safely("raw packet save", _save_raw(
+        device_id, raw, always=bool(alarm) or not data["known_keyword"]
+    ))
 
     if data["ignition"] is not None:
         await _safely("ignition update", set_ignition(device_id, data["ignition"]))
 
+    # The vehicle id is only needed for the alarm event: position storage
+    # resolves the vehicle inside the same SQL statement (save_location).
     vehicle_id = None
-    if position_ok or alarm:
+    if alarm:
         try:
             vehicle_id = await DeviceRepository.get_vehicle_by_device(device_id)
         except Exception as ex:
@@ -244,7 +252,7 @@ async def _handle_tracker(text, raw, writer):
         if data["timestamp"] is None:
             log("⚠️ Could not derive a device timestamp — using server receive time")
 
-        await _safely("tracking save", save_tracking(
+        await _safely("location save", save_location(
             device_id=device_id,
             latitude=data["latitude"],
             longitude=data["longitude"],
@@ -253,18 +261,6 @@ async def _handle_tracker(text, raw, writer):
             satellites=0,                      # GPS103 does not report satellite count
             event_time=event_time,
         ))
-        if vehicle_id:
-            await _safely("current location update", update_current_location(
-                device_id=device_id,
-                vehicle_id=vehicle_id,
-                latitude=data["latitude"],
-                longitude=data["longitude"],
-                speed=data["speed"],
-                heading=data["heading"],
-                event_time=event_time,
-            ))
-        else:
-            log("ℹ️ Device not assigned to a vehicle. Skipping CurrentLocation update.")
 
     if alarm:
         severity = Severity.HIGH if alarm in p.HIGH_SEVERITY_ALARMS else Severity.MEDIUM
