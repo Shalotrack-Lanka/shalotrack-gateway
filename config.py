@@ -38,6 +38,36 @@ GPS103_SPEED_IN_KMH = os.getenv("GPS103_SPEED_IN_KMH", "false").lower() == "true
 GPS103_MAX_UNFRAMED_BYTES = int(os.getenv("GPS103_MAX_UNFRAMED_BYTES", "2048"))
 
 # ================================================================
+# Device families
+# ================================================================
+# Which wire protocols this gateway accepts on its single port. A family that
+# is not listed is treated like unknown traffic: the connection is closed
+# ("Unrecognised protocol"). Default is exactly what ran before, so deploying
+# a new release never switches a new family on by itself. To enable Teltonika:
+#     ENABLED_PROTOCOLS=GT06,GPS103,TELTONIKA
+# Names are case-insensitive; unknown names are ignored (and logged at start).
+_ALL_PROTOCOLS = ("GT06", "GPS103", "TELTONIKA")
+ENABLED_PROTOCOLS_REQUESTED = tuple(
+    n.strip().upper()
+    for n in os.getenv("ENABLED_PROTOCOLS", "GT06,GPS103").split(",")
+    if n.strip()
+)
+ENABLED_PROTOCOLS = frozenset(n for n in ENABLED_PROTOCOLS_REQUESTED if n in _ALL_PROTOCOLS)
+
+# ================================================================
+# Teltonika (FMB series, Codec 8 / 8E over TCP)
+# ================================================================
+# Largest AVL "data field length" accepted. Teltonika devices cap a packet at
+# 1280 bytes; anything claiming more is garbage or an attack and the
+# connection is dropped instead of buffering it.
+TELTONIKA_MAX_PACKET_BYTES = int(os.getenv("TELTONIKA_MAX_PACKET_BYTES", "4096"))
+
+# A record stamped further in the future than this is not stored (a device
+# with a broken clock would otherwise freeze the live position at a time that
+# never arrives).
+TELTONIKA_MAX_FUTURE_SECONDS = int(os.getenv("TELTONIKA_MAX_FUTURE_SECONDS", "600"))
+
+# ================================================================
 # Database
 # ================================================================
 DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "5"))
