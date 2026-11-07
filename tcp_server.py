@@ -1,10 +1,17 @@
 import asyncio
 import os
 
-from config import CONNECTION_TIMEOUT, MAX_CONNECTIONS, PROBE_TIMEOUT
+from config import (
+    CONNECTION_TIMEOUT,
+    MAX_CONNECTIONS,
+    PROBE_TIMEOUT,
+    ENABLED_PROTOCOLS,
+    ENABLED_PROTOCOLS_REQUESTED,
+)
 from database import init_pool, close_pool
 from services.packet_handler import process_packet
 from services.gps103_handler import process_gps103_message
+from services.teltonika_handler import process_teltonika_frame
 from services.device_registry import (
     get_device,
     get_imei_by_socket,
@@ -12,12 +19,13 @@ from services.device_registry import (
     unregister_device,
     update_last_seen,
 )
-from protocols import GT06, GPS103, detect_protocol
+from protocols import GT06, GPS103, TELTONIKA, detect_protocol
 from services.tracking_service import set_device_offline
 from utils.logger import log, debug
 from console import start_console
 from utils.packet_buffer import extract_packets
 from parsers.gps103_parser import extract_messages
+from parsers.teltonika_parser import extract_frames as extract_teltonika_frames
 from command_api import start_command_api_thread
 
 HOST = "0.0.0.0"
@@ -27,10 +35,12 @@ PORT = int(os.environ.get("PORT", 9000))
 #   framer(buffer)                  -> (list_of_frames, remaining_buffer)
 #   handler(frame, writer, addr)    -> imei once authenticated, else None
 # The family is chosen once per connection from its first bytes
-# (protocols.detect_protocol). To add a family, add a row here.
+# (protocols.detect_protocol), and only if it is listed in
+# config.ENABLED_PROTOCOLS. To add a family: docs/adding-a-protocol.md.
 PROTOCOL_PIPELINES = {
-    GT06:   (extract_packets, process_packet),
-    GPS103: (extract_messages, process_gps103_message),
+    GT06:      (extract_packets, process_packet),
+    GPS103:    (extract_messages, process_gps103_message),
+    TELTONIKA: (extract_teltonika_frames, process_teltonika_frame),
 }
 
 # ---------------------------------------------------------------------------
@@ -87,8 +97,8 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         if not data:
             return  # probe — connection closed with no data
 
-        # TCP may hand over the first segment in tiny pieces. The shortest
-        # protocol signature is 5 bytes ("imei:"), so top up before sniffing
+        # TCP may hand over the first segment in tiny pieces. The longest
+        # signature we check is 5 bytes ("imei:"), so top up before sniffing
         # rather than misclassify (and close) a legitimate device.
         while len(data) < 5:
             try:
@@ -101,7 +111,8 @@ async def handle_device(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
         protocol = detect_protocol(data)
         if protocol is None:
-            # Not GT06, not GPS103. Don't guess and don't hold the slot open.
+            # Unknown, or a family that is switched off. Don't guess and don't
+            # hold the slot open.
             log(f"🚫 Unrecognised protocol from {addr} — closing. First bytes: {data[:32].hex()}")
             return
 
@@ -190,6 +201,10 @@ async def main() -> None:
     log(f"⚙️  Connection timeout : {CONNECTION_TIMEOUT}s")
     log(f"⚙️  Max connections    : {MAX_CONNECTIONS}")
     log(f"⚙️  Probe timeout      : {PROBE_TIMEOUT}s")
+    log(f"⚙️  Protocols enabled  : {', '.join(sorted(ENABLED_PROTOCOLS)) or 'none'}")
+    ignored = [n for n in ENABLED_PROTOCOLS_REQUESTED if n not in ENABLED_PROTOCOLS]
+    if ignored:
+        log(f"⚠️ ENABLED_PROTOCOLS contains unknown name(s), ignored: {', '.join(ignored)}")
 
     try:
         async with server:

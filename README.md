@@ -76,6 +76,8 @@ LOG_LEVEL=DEBUG                 # DEBUG | INFO | WARNING | ERROR
 RAW_PACKET_MODE=selective       # all | selective | off
 RAW_PACKET_SAMPLE_RATE=0.02     # share of routine packets kept when selective
 GPS_TRACKING_IDEMPOTENT=false   # true only after the unique index exists (docs/gps-tracking-idempotency.md)
+# Device families accepted on the port (default shown), see docs/adding-a-protocol.md
+ENABLED_PROTOCOLS=GT06,GPS103   # add TELTONIKA to accept FMB trackers (docs/teltonika.md)
 ```
 
 ---
@@ -300,12 +302,13 @@ services/packet_handler.py: process_packet()
 
 ## Supported Device Families
 
-One TCP port serves several families; the family is detected from each connection's first bytes. Details, field rules and the verification checklist are in [`docs/multi-protocol.md`](docs/multi-protocol.md).
+One TCP port serves several families; the family is detected from each connection's first bytes. Details, field rules and the verification checklist are in [`docs/multi-protocol.md`](docs/multi-protocol.md). To add a family, follow [`docs/adding-a-protocol.md`](docs/adding-a-protocol.md). Families are switched on with `ENABLED_PROTOCOLS`.
 
 | Family | Devices | Status |
 |---|---|---|
 | `GT06` | V5 (2G) | Production |
-| `GPS103` | TK103A/B (Coban family) | Inbound only: login, heartbeat, position, alarms. Commands return `501`. Not yet verified on hardware. |
+| `GPS103` | TK103A/B (Coban family) | Inbound only: login, heartbeat, position, alarms. Commands return `501`. First unit connected; positions confirmed once a GPS fix was available. |
+| `TELTONIKA` | FMB series (Codec 8 / 8E) | Off by default (`ENABLED_PROTOCOLS`). Positions and ignition only. Tested, not yet verified on a physical unit, see [`docs/teltonika.md`](docs/teltonika.md). |
 
 ## Supported Protocols (GT06)
 
