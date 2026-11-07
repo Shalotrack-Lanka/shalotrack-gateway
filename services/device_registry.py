@@ -46,6 +46,16 @@ def get_device(imei: str) -> dict | None:
         return _by_imei.get(imei)
 
 
+def note_position(imei: str, speed: float | None) -> None:
+    """Remember when a position was last stored for this connection, and how fast
+    the vehicle was going. Used by the GPS103 poller to find silent trackers."""
+    with _lock:
+        device = _by_imei.get(imei)
+        if device:
+            device["last_position_at"] = datetime.now(timezone.utc)
+            device["last_speed"] = speed
+
+
 def update_last_seen(imei: str) -> None:
     with _lock:
         device = _by_imei.get(imei)

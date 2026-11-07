@@ -55,6 +55,27 @@ ENABLED_PROTOCOLS_REQUESTED = tuple(
 ENABLED_PROTOCOLS = frozenset(n for n in ENABLED_PROTOCOLS_REQUESTED if n in _ALL_PROTOCOLS)
 
 # ================================================================
+# GPS103 (TK103) position poller
+# ================================================================
+# Some TK103 units stay connected and send heartbeats but only report a position
+# when asked (or on an event). The proper cure is the unit's own setting (SMS,
+# see docs/gps103-commands.md). This poller is a safety net: if a connected
+# GPS103 tracker has not produced a stored position for GPS103_POLL_SECONDS,
+# the gateway asks it for one with the verified single-position command.
+# 0 (default) = off, so deploying never changes behaviour by itself.
+# Values 1..9 are raised to 10: every poll is one database row per device.
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+_poll = _int_env("GPS103_POLL_SECONDS", 0)
+GPS103_POLL_SECONDS = 0 if _poll <= 0 else max(10, _poll)
+# While the last stored speed was 0 (parked) poll this slowly instead.
+GPS103_POLL_IDLE_SECONDS = max(GPS103_POLL_SECONDS, _int_env("GPS103_POLL_IDLE_SECONDS", 300))
+
+# ================================================================
 # Teltonika (FMB series, Codec 8 / 8E over TCP)
 # ================================================================
 # Largest AVL "data field length" accepted. Teltonika devices cap a packet at

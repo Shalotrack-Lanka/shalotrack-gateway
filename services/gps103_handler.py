@@ -29,7 +29,7 @@ from parsers import gps103_parser as p
 from protocols import GPS103
 from repositories.device_repository import DeviceRepository
 from repositories.raw_packet_repository import RawPacketRepository
-from services.device_registry import register_device, get_device, get_imei_by_socket
+from services.device_registry import register_device, get_device, get_imei_by_socket, note_position
 from services.event_service import create_event
 from services.tracking_service import (
     save_location,
@@ -261,6 +261,7 @@ async def _handle_tracker(text, raw, writer):
             satellites=0,                      # GPS103 does not report satellite count
             event_time=event_time,
         ))
+        note_position(imei, data["speed"])
 
     if alarm:
         severity = Severity.HIGH if alarm in p.HIGH_SEVERITY_ALARMS else Severity.MEDIUM
