@@ -7,6 +7,8 @@ from config import (
     PROBE_TIMEOUT,
     ENABLED_PROTOCOLS,
     ENABLED_PROTOCOLS_REQUESTED,
+    GPS103_POLL_SECONDS,
+    GPS103_POLL_IDLE_SECONDS,
 )
 from database import init_pool, close_pool
 from services.packet_handler import process_packet
@@ -27,6 +29,7 @@ from utils.packet_buffer import extract_packets
 from parsers.gps103_parser import extract_messages
 from parsers.teltonika_parser import extract_frames as extract_teltonika_frames
 from command_api import start_command_api_thread
+from services.gps103_poller import run_gps103_poller
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
@@ -206,10 +209,17 @@ async def main() -> None:
     if ignored:
         log(f"⚠️ ENABLED_PROTOCOLS contains unknown name(s), ignored: {', '.join(ignored)}")
 
+    poller = None
+    if GPS103 in ENABLED_PROTOCOLS and GPS103_POLL_SECONDS:
+        poller = asyncio.create_task(run_gps103_poller())
+        log(f"⚙️  GPS103 poller      : every {GPS103_POLL_SECONDS}s moving, {GPS103_POLL_IDLE_SECONDS}s parked")
+
     try:
         async with server:
             await server.serve_forever()
     finally:
+        if poller:
+            poller.cancel()
         await close_pool()
 
 

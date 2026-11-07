@@ -68,6 +68,43 @@ been verified on a physical TK103; clones differ. First real use:
 4. If the tracker never answers, the unit does not accept GPRS commands in this
    format. Leave Where on SMS for that model and tell us which firmware it is.
 
+## A TK103 that connects but does not report by itself
+
+Symptom: heartbeats arrive every ~60 s, the device is "online", but positions
+appear only around a button press or an event (Where, Relay On, alarm). A GPS fix
+is present, so this is not a GPS problem: the unit is not set to upload positions
+on a timer, or is not in GPRS upload mode (`GPRS: OFF` in `check<password>`).
+
+**Real fix, on the unit (SMS, operator only).** Send one at a time and read each reply:
+
+1. `check123456`  -> note `GPRS:` and `IP:`
+2. `gprs123456`   -> only if GPRS is OFF (clones differ; some use `web123456`)
+3. `t005s***n123456` (or `t030s***n123456` for 30 s) -> `T ... ok`
+4. `check123456`  -> `GPRS: ON`, `IP:` set to the gateway
+
+Do this before relying on the poller.
+
+**Safety net in the gateway (off by default).** Set in the gateway environment:
+
+```
+GPS103_POLL_SECONDS=30         # 0 or unset = off; values 1-9 become 10
+GPS103_POLL_IDLE_SECONDS=300   # used while the last stored speed was 0 (parked)
+```
+
+When a connected GPS103 device has stored no position for that long, the gateway
+sends the verified `**,imei:<imei>,B;` (same as the Where button). Only GPS103
+sockets are ever written to. Cost: one small packet and one `GpsTrackings` row per
+poll, so 30 s moving is about 2,880 rows per driving day per device; parked
+devices use the slower idle interval. Startup log shows
+`GPS103 poller : every 30s moving, 300s parked` when active.
+
+Add `-e GPS103_POLL_SECONDS=30` to the `docker run` in `gateway-user-data.sh`
+(infrastructure repo), as for the other settings.
+
+**Not implemented: setting the interval over GPRS (`C` command).** Its argument
+format is not documented in any source we could check and differs between clones,
+so a wrong guess could silently do nothing. Use SMS.
+
 ## Possible next steps (decisions, not built)
 
 - **Hide the buttons a TK103 cannot do** in the portal (Laravel), so operators do
