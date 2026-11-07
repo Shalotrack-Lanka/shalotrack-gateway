@@ -55,13 +55,13 @@ Alarm keyword → event name: `help me`→`SOS`, `low battery`→`LOW_BATTERY`, 
 * Data before login drops the connection. No reply is ever sent to a rejected IMEI.
 * `GPS103_MAX_UNFRAMED_BYTES` (default 2048): a stream with no `;` terminator beyond that is dropped, so a client cannot make the gateway buffer without bound.
 * Log lines containing device input are escaped and length-capped (no log injection through CR/LF).
-* The HTTP command API refuses commands for GPS103 devices (`501`) instead of writing a GT06 binary frame into a TK103's socket.
+* The HTTP command API never writes a GT06 binary frame into a TK103's socket. GPS103 devices have their own text-command path: Where/Relay On work, the rest return a specific `501` (SMS only). See `docs/gps103-commands.md`.
 
 **Known gap (applies to V5 as well):** the IMEI is an identifier, not a secret. Anyone who learns a valid IMEI can log in as that device, and a new login replaces the existing registration. Mitigations worth scheduling: private APN / SIM-provider IP allowlisting for the NLB, per-IP failed-login rate limiting, and logging every login with source IP (already logged).
 
 ## Not done yet (deliberately out of scope for this change)
 
-1. **Outbound commands for TK103** (relay cut, interval, SMS-style config). Needs `utils/command_builder` split per protocol; commands already return `501` for these devices.
+1. **More outbound commands for TK103**: Where and Relay On are done (`docs/gps103-commands.md`). Engine cut is deliberately not built (safety); settings and queries are SMS-only until verified over GPRS on a real unit.
 2. **Battery level.** The GPS103 heartbeat/position carry none. `DeviceStatuses.BatteryLevel` is `NOT NULL`, so first contact inserts `0` as a "not reported" placeholder. The API/app should treat `0` from a GPS103 device as unknown, not as a dead battery (or the schema should allow NULL).
 3. **Admin portal:** the device-category dropdown must offer a TK103 option, otherwise `GpsDevices.DeviceModel` falls back to the literal `"TK103"` on auto-registration.
 4. **V5 (4G).** Expected to be GT06-compatible, but unverified. Capture its first packets before assuming. If it differs, add a family with one `detect.py` rule and one `PROTOCOL_PIPELINES` row.

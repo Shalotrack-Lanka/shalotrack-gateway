@@ -16,7 +16,8 @@ from services.command_service import (
     send_apn, send_server, send_batalm, send_poweralm,
     UnsupportedCommandError,
 )
-from services.device_registry import get_all_devices
+from services.device_registry import get_all_devices, get_device
+from services.gps103_command_service import send_gps103_command
 from services.health_service import get_health
 
 COMMAND_API_PORT = int(os.environ.get("COMMAND_API_PORT", 9001))
@@ -51,6 +52,21 @@ SIMPLE_COMMANDS = {
     "relay_off":     send_relay_off,
     "sos_delete":    send_sos_delete,
 }
+
+# Commands that take parameters (handled in do_POST below).
+PARAM_COMMANDS = (
+    "timer", "distance", "speed_alarm", "moving_alarm",
+    "fence_circle", "sos_add", "apn", "server",
+    "batalm", "poweralm",
+)
+KNOWN_COMMANDS = frozenset(SIMPLE_COMMANDS) | frozenset(PARAM_COMMANDS)
+
+
+def _device_protocol(imei: str):
+    """Protocol of a CONNECTED device, or None when it is offline / unknown."""
+    entry = get_device(imei)
+    return entry.get("protocol", "GT06") if entry else None
+
 
 # Set once by start_command_api_thread(). The HTTP server runs on its own
 # OS thread (BaseHTTPRequestHandler is synchronous); command_service
@@ -120,11 +136,7 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"connected_devices": result, "count": len(result)})
 
         elif self.path == "/commands":
-            all_commands = list(SIMPLE_COMMANDS.keys()) + [
-                "timer", "distance", "speed_alarm", "moving_alarm",
-                "fence_circle", "sos_add", "apn", "server",
-                "batalm", "poweralm"
-            ]
+            all_commands = list(SIMPLE_COMMANDS.keys()) + list(PARAM_COMMANDS)
             self._send_json(200, {"supported_commands": all_commands})
 
         else:
@@ -161,9 +173,21 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Missing 'command' field"})
             return
 
+        if command not in KNOWN_COMMANDS:
+            self._send_json(400, {
+                "error": f"Unknown command '{command}'",
+                "hint": "GET /commands for full list"
+            })
+            return
+
         try:
+            # GPS103 (TK103) devices take text commands, not GT06 frames: their
+            # own path, which also decides what a TK103 can do over GPRS.
+            if _device_protocol(imei) == "GPS103":
+                _run_async(send_gps103_command(imei, command))
+
             # Simple commands — no params needed
-            if command in SIMPLE_COMMANDS:
+            elif command in SIMPLE_COMMANDS:
                 _run_async(SIMPLE_COMMANDS[command](imei))
 
             # Parametrised commands
