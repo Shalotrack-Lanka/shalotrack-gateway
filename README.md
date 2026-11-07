@@ -307,7 +307,7 @@ One TCP port serves several families; the family is detected from each connectio
 | Family | Devices | Status |
 |---|---|---|
 | `GT06` | V5 (2G) | Production |
-| `GPS103` | TK103A/B (Coban family) | Inbound only: login, heartbeat, position, alarms. Commands return `501`. First unit connected; positions confirmed once a GPS fix was available. |
+| `GPS103` | TK103A/B (Coban family) | Login, heartbeat, position, alarms. Commands: Where and Relay On work, the rest are SMS-only (`501` with a clear message), see [`docs/gps103-commands.md`](docs/gps103-commands.md). First unit connected; positions confirmed once a GPS fix was available. |
 | `TELTONIKA` | FMB series (Codec 8 / 8E) | Off by default (`ENABLED_PROTOCOLS`). Positions and ignition only. Tested, not yet verified on a physical unit, see [`docs/teltonika.md`](docs/teltonika.md). |
 
 ## Supported Protocols (GT06)
