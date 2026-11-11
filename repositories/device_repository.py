@@ -1,5 +1,6 @@
 from database import get_db_connection, release_db_connection, managed_connection
 from utils.logger import log
+from services import device_access
 import uuid
 
 
@@ -27,6 +28,12 @@ class DeviceRepository:
            - Activated → auto-create GpsDevices record (second connection via managed_connection)
         3. IMEI not in either table → unknown device, rejected
         """
+        # In 'off' mode the query is byte-for-byte what it always was, so deploying this release can never
+        # depend on the new columns. Only 'shadow' and 'enforce' read them.
+        trial_on = device_access.MODE != "off"
+        extra_s = ', s."BoundAt", s."FirstSeenAt"' if trial_on else ""
+        extra = ', "BoundAt", "FirstSeenAt"' if trial_on else ""
+
         conn = await get_db_connection()
         try:
             # Step 1 — already in GpsDevices?
@@ -36,28 +43,29 @@ class DeviceRepository:
             # the old behaviour and is allowed.
             result = await conn.fetchrow(
                 '''
-                SELECT g."DeviceId", s."Status"
+                SELECT g."DeviceId", s."Status"{extra_s}
                 FROM "GpsDevices" g
                 LEFT JOIN "SetupShalotrackDevices" s ON s."ImeiNumber" = g."ImeiNumber"
                 WHERE g."ImeiNumber" = $1
                 LIMIT 1
-                ''',
+                '''.format(extra_s=extra_s),
                 imei
             )
             if result:
-                if result["Status"] is not None and result["Status"] != "Activated":
-                    log(f"🚫 IMEI {imei} Status = '{result['Status']}' — rejected (already registered)")
+                if result["Status"] is None:
+                    return str(result["DeviceId"])  # legacy/demo device: no setup row, allowed as before
+                if not await DeviceRepository._admit(conn, imei, result):
                     return None
                 return str(result["DeviceId"])
 
             # Step 2 — check SetupShalotrackDevices, Activated only
             setup = await conn.fetchrow(
                 """
-                SELECT "ImeiNumber", "DeviceCategory", "SimNumber", "Status"
+                SELECT "ImeiNumber", "DeviceCategory", "SimNumber", "Status"{extra}
                 FROM "SetupShalotrackDevices"
                 WHERE "ImeiNumber" = $1
                 LIMIT 1
-                """,
+                """.format(extra=extra),
                 imei
             )
 
@@ -65,9 +73,7 @@ class DeviceRepository:
                 log(f"🚫 IMEI {imei} not found in SetupShalotrackDevices — unknown device")
                 return None
 
-            status = setup["Status"]
-            if status != "Activated":
-                log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
+            if not await DeviceRepository._admit(conn, imei, setup):
                 return None
 
         except Exception as e:
@@ -122,6 +128,61 @@ class DeviceRepository:
         except Exception as e:
             log(f"❌ GpsDevices auto-registration error for {imei}: {e}")
             return None
+
+    @staticmethod
+    async def _admit(conn, imei: str, row) -> bool:
+        """
+        Apply the login rule (services/device_access.py) to a SetupShalotrackDevices row.
+        Returns True if the device may connect. Only 'enforce' mode changes behaviour.
+        """
+        status = row["Status"]
+        mode = device_access.MODE
+
+        if mode == "off":
+            if not device_access.old_rule(status):
+                log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
+                return False
+            return True
+
+        decision = device_access.decide(status, row["BoundAt"], row["FirstSeenAt"])
+        old_allows = device_access.old_rule(status)
+
+        if mode == "shadow":
+            if decision.allowed != old_allows:
+                log(
+                    f"🧪 TRIAL-SHADOW IMEI {imei} Status='{status}' reason={decision.reason}: "
+                    f"new rule would {'ACCEPT' if decision.allowed else 'REFUSE'}, "
+                    f"current rule {'accepts' if old_allows else 'refuses'}"
+                )
+            if not old_allows:
+                log(f"🚫 IMEI {imei} Status = '{status}' — rejected")
+            return old_allows
+
+        # enforce
+        if not decision.allowed:
+            log(f"🚫 IMEI {imei} Status = '{status}' — rejected ({decision.reason})")
+            return False
+
+        if decision.stamp_first_seen:
+            # First connection of a trial device starts its clock. COALESCE makes concurrent first logins
+            # agree on one start time. If the stamp cannot be written the device is REFUSED: accepting
+            # without a clock would make the trial endless.
+            try:
+                await conn.execute(
+                    '''
+                    UPDATE "SetupShalotrackDevices"
+                    SET "FirstSeenAt" = COALESCE("FirstSeenAt", NOW())
+                    WHERE "ImeiNumber" = $1
+                    ''',
+                    imei,
+                )
+            except Exception as e:
+                log(f"❌ Could not start trial clock for {imei}: {e} — refusing")
+                return False
+            log(f"🆕 IMEI {imei} first connection — {device_access.TRIAL_HOURS}h trial started")
+        elif decision.reason == "trial":
+            log(f"⏳ IMEI {imei} on trial (not yet bound)")
+        return True
 
     @staticmethod
     async def get_vehicle_by_device(device_id: str) -> str | None:
