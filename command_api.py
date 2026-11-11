@@ -20,6 +20,7 @@ from services.device_registry import get_all_devices, get_device
 from services.gps103_command_service import send_gps103_command
 from services.health_service import get_health
 from services.device_enforcer import drop_device
+from services.access_report import build_report
 
 COMMAND_API_PORT = int(os.environ.get("COMMAND_API_PORT", 9001))
 
@@ -135,6 +136,14 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
                 for imei, info in devices.items()
             ]
             self._send_json(200, {"connected_devices": result, "count": len(result)})
+
+        elif self.path == "/access":
+            # Read-only report for the ERP Gateway page (trial hours left, expired, stopped, connected).
+            try:
+                self._send_json(200, _run_async(build_report(), timeout=10.0))
+            except Exception as ex:
+                log(f"❌ /access report failed: {ex}")
+                self._send_json(503, {"error": "Report unavailable"})
 
         elif self.path == "/commands":
             all_commands = list(SIMPLE_COMMANDS.keys()) + list(PARAM_COMMANDS)
