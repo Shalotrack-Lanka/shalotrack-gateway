@@ -30,6 +30,7 @@ from parsers.gps103_parser import extract_messages
 from parsers.teltonika_parser import extract_frames as extract_teltonika_frames
 from command_api import start_command_api_thread
 from services.gps103_poller import run_gps103_poller
+from services.device_enforcer import RECHECK_MODE, run_recheck_loop
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", 9000))
@@ -214,12 +215,18 @@ async def main() -> None:
         poller = asyncio.create_task(run_gps103_poller())
         log(f"⚙️  GPS103 poller      : every {GPS103_POLL_SECONDS}s moving, {GPS103_POLL_IDLE_SECONDS}s parked")
 
+    recheck = None
+    if RECHECK_MODE != "off":
+        recheck = asyncio.create_task(run_recheck_loop())
+
     try:
         async with server:
             await server.serve_forever()
     finally:
         if poller:
             poller.cancel()
+        if recheck:
+            recheck.cancel()
         await close_pool()
 
 

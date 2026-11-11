@@ -34,3 +34,27 @@ The gateway never writes `BoundAt` or `Status`; those belong to the ERP sync.
 1. Deploy with `DEVICE_TRIAL_MODE` unset (= off). No change.
 2. Set `shadow`, watch the logs for a few days (`grep TRIAL-SHADOW`).
 3. Run the GRANT, set `enforce`. Rollback = set back to `off`/`shadow` and restart; stamped `FirstSeenAt` values are harmless.
+
+## 5-minute re-check and drop (Phase C2)
+The login rule only runs when a device connects. A device already connected when it is stopped would stay online,
+so the gateway also re-checks every connected device on a timer, and the ERP/API can drop one on demand.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `DEVICE_RECHECK_MODE` | `off` | `off` nothing; `shadow` logs `RECHECK-SHADOW would drop ...`; `enforce` closes the socket |
+| `DEVICE_RECHECK_SECONDS` | `300` | Interval |
+| `DEVICE_RECHECK_MAX_DROP_FRACTION` | `0.2` | Safety valve: if one cycle would drop more than this share of connected devices (min allowance 5), it drops NOTHING and logs an alarm (a bad sync, not real stops) |
+
+- One batched query per 1000 connected IMEIs. A database error drops nothing.
+- Uses the same rule as login (trial rule when `DEVICE_TRIAL_MODE=enforce`, otherwise the old Activated rule).
+  A connected device whose trial clock is missing is kept, never cut.
+- Legacy devices with no setup row are never dropped.
+- A dropped device cannot log back in because the login rule refuses it. Dropped devices keep recording up to the drop.
+
+### `POST /drop` (Command API, same `X-Command-Api-Key`)
+Body `{"imei": "<digits 5-20>", "reason": "<=60 chars>"}` -> `{"success": true, "imei": "...", "was_connected": bool}`.
+Works in any mode (it is an explicit order). Offline device = `was_connected: false`, not an error.
+
+### Rollout
+1. Deploy with `DEVICE_RECHECK_MODE` unset (off). 2. Set `shadow`, watch `RECHECK-SHADOW` for a few days. 3. Set `enforce`.
+Rollback: set back to `off` and restart.
