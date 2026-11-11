@@ -58,3 +58,8 @@ Works in any mode (it is an explicit order). Offline device = `was_connected: fa
 ### Rollout
 1. Deploy with `DEVICE_RECHECK_MODE` unset (off). 2. Set `shadow`, watch `RECHECK-SHADOW` for a few days. 3. Set `enforce`.
 Rollback: set back to `off` and restart.
+
+### `GET /access` (Command API, same key) - read-only report for the ERP "Gateway Devices" page
+Returns `trial_mode`, `recheck_mode`, `connected_now`, `counts` (allowed / trial / trial_not_started / trial_expired / stopped)
+and up to 1000 `devices` that need attention or are connected, with trial hours left. It answers "what would the trial
+rule do to each device right now" whatever the mode is. Nothing is written. A database error returns 503 with no details.
