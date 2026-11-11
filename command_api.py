@@ -19,6 +19,7 @@ from services.command_service import (
 from services.device_registry import get_all_devices, get_device
 from services.gps103_command_service import send_gps103_command
 from services.health_service import get_health
+from services.device_enforcer import drop_device
 
 COMMAND_API_PORT = int(os.environ.get("COMMAND_API_PORT", 9001))
 
@@ -142,9 +143,32 @@ class CommandAPIHandler(BaseHTTPRequestHandler):
         else:
             self._send_json(404, {"error": "Not found"})
 
+    def _handle_drop(self):
+        """Disconnect one device now (the API calls this when the ERP stops a device). Same key as /command."""
+        length = int(self.headers.get("Content-Length", 0))
+        if length == 0 or length > 4096:
+            self._send_json(400, {"error": "Empty or oversized request body"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_json(400, {"error": "Invalid JSON"})
+            return
+        imei = str(body.get("imei", "")).strip()
+        if not imei.isdigit() or not (5 <= len(imei) <= 20):
+            self._send_json(400, {"error": "Missing or invalid 'imei'"})
+            return
+        reason = str(body.get("reason", "api"))[:60]
+        dropped = _run_async(drop_device(imei, reason))
+        self._send_json(200, {"success": True, "imei": imei, "was_connected": bool(dropped)})
+
     def do_POST(self):
         if not self._authorized():
             self._send_json(401, {"error": "Unauthorized"})
+            return
+
+        if self.path == "/drop":
+            self._handle_drop()
             return
 
         if self.path != "/command":
