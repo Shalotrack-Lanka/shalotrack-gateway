@@ -14,6 +14,7 @@ from database import init_pool, close_pool
 from services.packet_handler import process_packet
 from services.gps103_handler import process_gps103_message
 from services.teltonika_handler import process_teltonika_frame
+from services.h02_handler import process_h02_frame
 from services.device_registry import (
     get_device,
     get_imei_by_socket,
@@ -21,13 +22,14 @@ from services.device_registry import (
     unregister_device,
     update_last_seen,
 )
-from protocols import GT06, GPS103, TELTONIKA, detect_protocol
+from protocols import GT06, GPS103, TELTONIKA, H02, detect_protocol
 from services.tracking_service import set_device_offline
 from utils.logger import log, debug
 from console import start_console
 from utils.packet_buffer import extract_packets
 from parsers.gps103_parser import extract_messages
 from parsers.teltonika_parser import extract_frames as extract_teltonika_frames
+from parsers.h02_parser import extract_frames as extract_h02_frames
 from command_api import start_command_api_thread
 from services.gps103_poller import run_gps103_poller
 from services.device_enforcer import RECHECK_MODE, run_recheck_loop
@@ -45,6 +47,7 @@ PROTOCOL_PIPELINES = {
     GT06:      (extract_packets, process_packet),
     GPS103:    (extract_messages, process_gps103_message),
     TELTONIKA: (extract_teltonika_frames, process_teltonika_frame),
+    H02:       (extract_h02_frames, process_h02_frame),
 }
 
 # ---------------------------------------------------------------------------

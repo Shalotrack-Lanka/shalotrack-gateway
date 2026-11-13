@@ -77,7 +77,7 @@ RAW_PACKET_MODE=selective       # all | selective | off
 RAW_PACKET_SAMPLE_RATE=0.02     # share of routine packets kept when selective
 GPS_TRACKING_IDEMPOTENT=false   # true only after the unique index exists (docs/gps-tracking-idempotency.md)
 # Device families accepted on the port (default shown), see docs/adding-a-protocol.md
-ENABLED_PROTOCOLS=GT06,GPS103   # add TELTONIKA to accept FMB trackers (docs/teltonika.md)
+ENABLED_PROTOCOLS=GT06,GPS103   # add TELTONIKA (docs/teltonika.md) and/or H02 (docs/h02.md) to accept those trackers
 ```
 
 ---
@@ -221,11 +221,13 @@ shalotrack-gateway/
 ├── database.py                # Thread-safe PostgreSQL connection pool with retry-on-exhaustion
 │
 ├── protocols/
-│   └── detect.py              # Per-connection protocol detection (first bytes) -> GT06 / GPS103
+│   └── detect.py              # Per-connection protocol detection (first bytes) -> GT06 / GPS103 / TELTONIKA / H02
 │
 ├── parsers/
 │   ├── v5_parser.py           # All GT06/V5 packet parsing + CRC16-X25 + ACK building
-│   └── gps103_parser.py       # GPS103 (TK103A/B) framing + text parsing (pure functions)
+│   ├── gps103_parser.py       # GPS103 (TK103A/B) framing + text parsing (pure functions)
+│   ├── teltonika_parser.py    # Teltonika Codec 8 / 8E framing + decoding (pure functions)
+│   └── h02_parser.py          # H02 (LK208 and the *HQ,...# family) framing + text/binary decoding (pure functions)
 │
 ├── decoders/                  # Protocol 0x94 / 0x6e Information packet sub-field decoders
 │   ├── information_decoder.py     (orchestrator)
@@ -240,6 +242,8 @@ shalotrack-gateway/
 ├── services/
 │   ├── packet_handler.py      # GT06 dispatcher: protocol detection → parse → save → ACK
 │   ├── gps103_handler.py      # GPS103 dispatcher: login / heartbeat / position / alarms
+│   ├── teltonika_handler.py   # Teltonika dispatcher: IMEI login / AVL records / ignition
+│   ├── h02_handler.py         # H02 dispatcher: first message = login / ack / heartbeat / position
 │   ├── device_registry.py     # Thread-safe in-memory registry (IMEI → socket, O(1) reverse lookup)
 │   ├── command_service.py     # Sends remote commands to connected device sockets
 │   ├── tracking_service.py    # Writes GPS/status/heartbeat data to PostgreSQL
@@ -309,6 +313,7 @@ One TCP port serves several families; the family is detected from each connectio
 | `GT06` | V5 (2G) | Production |
 | `GPS103` | TK103A/B (Coban family) | Login, heartbeat, position, alarms. Commands: Where and Relay On work, the rest are SMS-only (`501` with a clear message), see [`docs/gps103-commands.md`](docs/gps103-commands.md). First unit connected; positions confirmed once a GPS fix was available. |
 | `TELTONIKA` | FMB series (Codec 8 / 8E) | Off by default (`ENABLED_PROTOCOLS`). Positions and ignition only. Tested, not yet verified on a physical unit, see [`docs/teltonika.md`](docs/teltonika.md). |
+| `H02` | LK-GPS LK208 and the many `*HQ,<id>,V1,...#` trackers (text and binary forms) | Off by default (`ENABLED_PROTOCOLS`). Positions, heartbeat, acknowledgements; ignition and alarms decoded but gated off (`H02_STATUS_FLAGS`). No commands (`501`). Tested against real published frames, not yet verified on a physical LK208, see [`docs/h02.md`](docs/h02.md). |
 
 ## Supported Protocols (GT06)
 

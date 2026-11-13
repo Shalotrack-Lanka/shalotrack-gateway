@@ -45,8 +45,10 @@ GPS103_MAX_UNFRAMED_BYTES = int(os.getenv("GPS103_MAX_UNFRAMED_BYTES", "2048"))
 # ("Unrecognised protocol"). Default is exactly what ran before, so deploying
 # a new release never switches a new family on by itself. To enable Teltonika:
 #     ENABLED_PROTOCOLS=GT06,GPS103,TELTONIKA
+# To enable the H02 family (LK-GPS LK208 and similar, docs/h02.md):
+#     ENABLED_PROTOCOLS=GT06,GPS103,H02
 # Names are case-insensitive; unknown names are ignored (and logged at start).
-_ALL_PROTOCOLS = ("GT06", "GPS103", "TELTONIKA")
+_ALL_PROTOCOLS = ("GT06", "GPS103", "TELTONIKA", "H02")
 ENABLED_PROTOCOLS_REQUESTED = tuple(
     n.strip().upper()
     for n in os.getenv("ENABLED_PROTOCOLS", "GT06,GPS103").split(",")
@@ -87,6 +89,30 @@ TELTONIKA_MAX_PACKET_BYTES = int(os.getenv("TELTONIKA_MAX_PACKET_BYTES", "4096")
 # with a broken clock would otherwise freeze the live position at a time that
 # never arrives).
 TELTONIKA_MAX_FUTURE_SECONDS = int(os.getenv("TELTONIKA_MAX_FUTURE_SECONDS", "600"))
+
+# ================================================================
+# H02 (LK-GPS LK208 and the "*HQ,<id>,V1,...#" family)
+# ================================================================
+# A text frame ends with '#'. If this many bytes arrive with no '#' the stream
+# is garbage (or an attack) and the connection is dropped.
+H02_MAX_UNFRAMED_BYTES = int(os.getenv("H02_MAX_UNFRAMED_BYTES", "2048"))
+
+# H02 speed is in KNOTS (Traccar passes the field through as knots). If a real
+# unit reads low by a factor of ~1.85 against the vehicle speedometer, its
+# firmware sends km/h: set this to "true".
+H02_SPEED_IN_KMH = os.getenv("H02_SPEED_IN_KMH", "false").strip().lower() == "true"
+
+# The 8-hex-digit status word carries ignition (bit 10) and alarm bits
+# (vibration, SOS, overspeed, power cut; a CLEARED bit means "active"). It is
+# decoded from a published reference, not yet checked on a physical LK208, and
+# a battery-powered magnet tracker has no ignition wire, so it is OFF by
+# default: no ignition state and no alarm events are written. Turn on after
+# confirming on the real unit (docs/h02.md).
+H02_STATUS_FLAGS = os.getenv("H02_STATUS_FLAGS", "false").strip().lower() == "true"
+
+# A fix stamped further in the future than this is not stored (a device with a
+# broken clock would freeze the live position at a time that never arrives).
+H02_MAX_FUTURE_SECONDS = int(os.getenv("H02_MAX_FUTURE_SECONDS", "600"))
 
 # ================================================================
 # Database

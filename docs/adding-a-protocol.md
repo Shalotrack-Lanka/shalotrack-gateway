@@ -19,9 +19,10 @@ frame ──► handler ──► DeviceRepository / device_registry / save_loca
 | `GT06` (V5, Concox/Jimi 2G) | `78 78` / `79 79` | `utils/packet_buffer.extract_packets` | `services/packet_handler.py` | yes |
 | `GPS103` (TK103A/B) | `##` / `imei:` | `parsers/gps103_parser.extract_messages` | `services/gps103_handler.py` | yes |
 | `TELTONIKA` (FMB, Codec 8/8E) | `00 0F` + 15 digits | `parsers/teltonika_parser.extract_frames` | `services/teltonika_handler.py` | **no** |
+| `H02` (LK208, `*HQ,<id>,V1,...#`) | `*XX,` + letters / `$` | `parsers/h02_parser.extract_frames` | `services/h02_handler.py` | **no** |
 
 Switch families with `ENABLED_PROTOCOLS` (comma list, e.g.
-`GT06,GPS103,TELTONIKA`). A family that is not listed behaves exactly like
+`GT06,GPS103,TELTONIKA,H02`). A family that is not listed behaves exactly like
 unknown traffic: the connection is closed. A new release never turns a new
 family on by itself.
 
