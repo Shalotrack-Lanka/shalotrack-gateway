@@ -214,6 +214,15 @@ def decode_status(status: int):
     return bit(10), alarm
 
 
+def power_cut(status: int) -> bool:
+    """
+    True when bit 19 is CLEARED (external power lost). Separate from
+    decode_status() because that returns only the first alarm that matches:
+    a vibration or SOS bit set at the same time would hide the power cut.
+    """
+    return not bool((status >> 19) & 1)
+
+
 # ---------------------------------------------------------------------------
 # Text
 # ---------------------------------------------------------------------------

@@ -45,7 +45,7 @@ from repositories.raw_packet_repository import RawPacketRepository
 from services.device_registry import register_device, get_device, get_imei_by_socket, note_position
 from services.event_service import create_event
 from services.raw_packet_policy import should_store_raw
-from services.tracking_service import save_location, mark_device_alive, set_ignition
+from services.tracking_service import save_location, mark_device_alive, set_ignition, set_power_status
 from utils.logger import log, debug
 
 DEFAULT_MODEL = "H02"
@@ -59,6 +59,7 @@ _ALIVE_REFRESH_SECONDS = 60
 _last_alive: dict[str, float] = {}
 _last_ignition: dict[str, bool] = {}
 _last_alarm: dict[str, str | None] = {}
+_last_power: dict[str, bool] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +189,7 @@ async def _authenticate(msg: p.H02Message, raw, writer, addr):
     _last_alive.pop(device_id, None)
     _last_ignition.pop(device_id, None)
     _last_alarm.pop(device_id, None)
+    _last_power.pop(device_id, None)
 
     # Answer first (the unit waits for its acknowledgement), bookkeeping after.
     await _handle_message(msg, raw, writer, msg.device_id, first=True)
@@ -259,6 +261,12 @@ async def _handle_message(msg: p.H02Message, raw, writer, imei, first: bool) -> 
             await _safely("ignition update", set_ignition(device_id, ignition))
             _last_ignition[device_id] = ignition
             _last_alive[device_id] = time.monotonic()
+        cut = p.power_cut(msg.status)
+        if _last_power.get(device_id) != cut:
+            # Written on the transition only: the first report after a login
+            # always writes, which also clears a power cut left from before.
+            await _safely("power status update", set_power_status(device_id, cut))
+            _last_power[device_id] = cut
 
     await _refresh_alive(device_id, heartbeat=msg.kind == p.HEARTBEAT)
 

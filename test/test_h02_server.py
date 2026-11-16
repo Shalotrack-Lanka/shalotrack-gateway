@@ -39,6 +39,8 @@ BIN_BOGOTA = bytes.fromhex(
 IDLE = "FFFFFBFF"                   # no alarm, ignition off
 IGNITION_ON = "FFFFFFFF"            # bit 10 set
 SOS = "FFFFFBFD"                    # bit 1 cleared
+POWER_CUT = "FFF7FBFF"              # bit 19 cleared
+SOS_AND_POWER_CUT = "FFF7FBFD"      # bits 19 and 1 cleared
 
 
 def stamp(seconds_ago: float = 30):
@@ -67,6 +69,7 @@ class H02ServerTests(ServerTestCase):
         h02_handler._last_alive.clear()
         h02_handler._last_ignition.clear()
         h02_handler._last_alarm.clear()
+        h02_handler._last_power.clear()
 
         async def lookup(imei, **kwargs):
             return DEVICE_ID if imei in (IMEI, SHORT_ID, "359586015829802") else None
@@ -78,6 +81,7 @@ class H02ServerTests(ServerTestCase):
             ("event", "services.h02_handler.create_event", {"new_callable": AsyncMock}),
             ("alive_h", "services.h02_handler.mark_device_alive", {"new_callable": AsyncMock}),
             ("ignition_h", "services.h02_handler.set_ignition", {"new_callable": AsyncMock}),
+            ("power_h", "services.h02_handler.set_power_status", {"new_callable": AsyncMock}),
             # Only forced saves (first message, unknown type) reach RawPackets in these tests.
             ("policy", "services.h02_handler.should_store_raw", {"side_effect": lambda always=False: always}),
             ("log_h", "services.h02_handler.log", {}),
@@ -373,6 +377,29 @@ class H02ServerTests(ServerTestCase):
         self.assertAlmostEqual(alarms[0]["latitude"], 6.9366, places=3)
         self.assertEqual(alarms[0]["metadata"]["protocol"], "H02")
         self.assertEqual(alarms[0]["metadata"]["status"], SOS)
+
+    async def test_power_is_ignored_by_default(self):
+        reader, writer = await self.login_ok()
+        await self.send(writer, v1(status=POWER_CUT))
+        await self.read(reader)
+        self.mocks["power_h"].assert_not_awaited()
+
+    async def test_power_is_written_once_per_change_when_enabled(self):
+        with patch.object(config, "H02_STATUS_FLAGS", True):
+            reader, writer = await self.login_ok()                              # IDLE -> power connected
+            for status in (IDLE, POWER_CUT, POWER_CUT, IDLE):
+                await self.send(writer, v1(status=status))
+                await self.read(reader)
+        values = [c.args for c in self.mocks["power_h"].await_args_list]
+        self.assertEqual(values, [(DEVICE_ID, False), (DEVICE_ID, True), (DEVICE_ID, False)])
+
+    async def test_power_cut_is_seen_even_when_another_alarm_bit_is_set(self):
+        # SOS and power cut together: decode_status reports only SOS, power must still be written.
+        with patch.object(config, "H02_STATUS_FLAGS", True):
+            reader, writer = await self.login_ok()
+            await self.send(writer, v1(status=SOS_AND_POWER_CUT))
+            await self.read(reader)
+        self.assertEqual(self.mocks["power_h"].call_args.args, (DEVICE_ID, True))
 
     async def test_alarm_without_a_fix_has_no_coordinates(self):
         with patch.object(config, "H02_STATUS_FLAGS", True):

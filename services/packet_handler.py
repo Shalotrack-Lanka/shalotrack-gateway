@@ -15,7 +15,7 @@ from parsers.v5_parser import (
 from parsers.command_response_parser import parse_command_response
 from services.command_response_service import handle_command_response
 from services.device_registry import register_device, get_device, get_imei_by_socket
-from services.tracking_service import save_location, update_device_status, update_heartbeat
+from services.tracking_service import save_location, update_device_status, update_heartbeat, set_power_status
 from services.raw_packet_policy import should_store_raw
 from repositories.device_repository import DeviceRepository
 from repositories.raw_packet_repository import RawPacketRepository
@@ -251,6 +251,16 @@ async def process_packet(data, writer, addr):
                     else Severity.MEDIUM
                 )
                 vehicle_id = await DeviceRepository.get_vehicle_by_device(device["device_id"])
+
+                # A power-cut alarm must reach DeviceStatuses.PowerStatus, the
+                # column the push notification is driven from. Status and
+                # heartbeat packets write it too, but an alarm can arrive first.
+                if alarm["alarm_type"] == 2 or alarm["power_cut"]:
+                    try:
+                        await set_power_status(device["device_id"], True)
+                    except Exception as ex:
+                        log(f"❌ power status update failed: {ex}")
+
                 await create_event(
                     device_id=device["device_id"],
                     vehicle_id=vehicle_id,

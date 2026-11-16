@@ -45,6 +45,7 @@ class TeltonikaServerTests(ServerTestCase):
         await super().asyncSetUp()
         teltonika_handler._last_alive.clear()
         teltonika_handler._last_ignition.clear()
+        teltonika_handler._last_power.clear()
 
         async def lookup(imei, **kwargs):
             return DEVICE_ID if imei in (IMEI, "359586015829802") else None
@@ -56,6 +57,7 @@ class TeltonikaServerTests(ServerTestCase):
             ("event", "services.teltonika_handler.create_event", {"new_callable": AsyncMock}),
             ("alive_t", "services.teltonika_handler.mark_device_alive", {"new_callable": AsyncMock}),
             ("ignition_t", "services.teltonika_handler.set_ignition", {"new_callable": AsyncMock}),
+            ("power_t", "services.teltonika_handler.set_power_status", {"new_callable": AsyncMock}),
             # Only forced saves (login, undecodable) reach RawPackets in these tests.
             ("policy", "services.teltonika_handler.should_store_raw", {"side_effect": lambda always=False: always}),
         ):
@@ -222,6 +224,30 @@ class TeltonikaServerTests(ServerTestCase):
         await self.read(reader)
         self.assertEqual(self.mocks["ignition_t"].await_count, 2)
         self.assertEqual(self.mocks["ignition_t"].call_args.args, (DEVICE_ID, False))
+
+    async def test_power_cut_is_written_once_per_change_not_per_packet(self):
+        reader, writer = await self.login_ok()
+        for value in (0, 0, 1, 1, 0):                       # IO 252 "unplug": 1 = external power removed
+            await self.send(writer, build_avl_packet([fix(io1={252: value})]))
+            await self.read(reader)
+        values = [c.args for c in self.mocks["power_t"].await_args_list]
+        self.assertEqual(values, [(DEVICE_ID, False), (DEVICE_ID, True), (DEVICE_ID, False)])
+
+    async def test_a_packet_without_the_unplug_io_does_not_touch_power(self):
+        reader, writer = await self.login_ok()
+        await self.send(writer, build_avl_packet([fix(io1={239: 1})]))
+        await self.read(reader)
+        self.mocks["power_t"].assert_not_awaited()
+
+    async def test_a_new_connection_rewrites_power_even_if_unchanged(self):
+        reader, writer = await self.login_ok()
+        await self.send(writer, build_avl_packet([fix(io1={252: 1})]))
+        await self.read(reader)
+        writer.close()
+        reader, writer = await self.login_ok()
+        await self.send(writer, build_avl_packet([fix(io1={252: 1})]))
+        await self.read(reader)
+        self.assertEqual(self.mocks["power_t"].await_count, 2)
 
     async def test_last_seen_refresh_is_rate_limited(self):
         reader, writer = await self.login_ok()

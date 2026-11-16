@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import config                                                  # noqa: E402
 import tcp_server                                              # noqa: E402
 from services import device_registry                            # noqa: E402
 from services.command_service import send_command, UnsupportedCommandError  # noqa: E402
@@ -51,6 +52,25 @@ def gt06_login(imei: str, serial: int = 1) -> bytes:
     return b"\x78\x78" + bytes([length]) + body + crc.to_bytes(2, "big") + b"\x0d\x0a"
 
 
+def gt06_alarm(alarm_type: int, terminal_info: int = 0x46, serial: int = 3) -> bytes:
+    """0x26 alarm packet; alarm_type is the high nibble of the alarm/language byte."""
+    now = datetime.now(timezone.utc)
+    dt = bytes([now.year - 2000, now.month, now.day, now.hour, now.minute, now.second])
+    payload = (
+        dt + bytes([0x0C])
+        + int(6.9271 * 1_800_000).to_bytes(4, "big")
+        + int(79.8612 * 1_800_000).to_bytes(4, "big")
+        + bytes([42])
+        + ((90 & 0x03FF) | 0x0400 | 0x1000).to_bytes(2, "big")
+        + (413).to_bytes(2, "big") + bytes([1]) + (1).to_bytes(2, "big") + (1).to_bytes(3, "big")
+        + bytes([terminal_info, 4, 3, (alarm_type << 4) | 0x01])
+    )
+    body = bytes([0x26]) + payload + serial.to_bytes(2, "big")
+    length = len(body) + 2
+    crc = crc16_x25(bytes([length]) + body)
+    return b"\x78\x78" + bytes([length]) + body + crc.to_bytes(2, "big") + b"\x0d\x0a"
+
+
 def gt06_location(serial: int = 2) -> bytes:
     now = datetime.now(timezone.utc)
     dt = bytes([now.year - 2000, now.month, now.day, now.hour, now.minute, now.second])
@@ -71,6 +91,8 @@ class ServerTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         device_registry._by_imei.clear()
         device_registry._by_socket.clear()
+        from services import gps103_handler
+        gps103_handler._power_cut_at.clear()
 
         async def lookup(imei, **kwargs):
             return DEVICE_ID if imei in (KNOWN_IMEI, OTHER_IMEI, GT06_IMEI) else None
@@ -84,6 +106,8 @@ class ServerTestCase(unittest.IsolatedAsyncioTestCase):
             "track_g103": patch("services.gps103_handler.save_location", new_callable=AsyncMock),
             "alive": patch("services.gps103_handler.mark_device_alive", new_callable=AsyncMock),
             "ignition": patch("services.gps103_handler.set_ignition", new_callable=AsyncMock),
+            "power_g103": patch("services.gps103_handler.set_power_status", new_callable=AsyncMock),
+            "power_gt06": patch("services.packet_handler.set_power_status", new_callable=AsyncMock),
             "event_gt06": patch("services.packet_handler.create_event", new_callable=AsyncMock),
             "track_gt06": patch("services.packet_handler.save_location", new_callable=AsyncMock, return_value=True),
             "offline": patch("tcp_server.set_device_offline", new_callable=AsyncMock),
@@ -253,6 +277,62 @@ class Gps103FlowTests(ServerTestCase):
         self.mocks["vehicle"].assert_not_awaited()
 
 
+class Gps103PowerCutTests(ServerTestCase):
+    """GPS103 says 'power cut' once and never 'power back': see config.GPS103_POWER_CUT_RESET_SECONDS."""
+
+    async def test_login_clears_any_power_cut(self):
+        await self.login()
+        self.assertEqual(self.mocks["power_g103"].call_args.args, (DEVICE_ID, False))
+
+    async def test_ac_alarm_marks_power_disconnected(self):
+        _, writer = await self.login()
+        self.mocks["power_g103"].reset_mock()
+        writer.write(tracker("ac alarm"))
+        await writer.drain()
+        await self.until(lambda: self.mocks["power_g103"].await_count == 1)
+        self.assertEqual(self.mocks["power_g103"].call_args.args, (DEVICE_ID, True))
+
+    async def test_a_normal_report_does_not_touch_power(self):
+        _, writer = await self.login()
+        self.mocks["power_g103"].reset_mock()
+        writer.write(tracker())
+        await writer.drain()
+        await self.until(lambda: self.mocks["track_g103"].await_count == 1)
+        self.mocks["power_g103"].assert_not_awaited()
+
+    async def test_power_is_restored_by_the_first_message_after_the_window(self):
+        from services import gps103_handler
+        _, writer = await self.login()
+        self.mocks["power_g103"].reset_mock()
+        with patch.object(config, "GPS103_POWER_CUT_RESET_SECONDS", 600):
+            writer.write(tracker("ac alarm"))
+            await writer.drain()
+            await self.until(lambda: self.mocks["power_g103"].await_count == 1)
+            writer.write(tracker())                                 # inside the window: no reset
+            await writer.drain()
+            await self.until(lambda: self.mocks["track_g103"].await_count == 2)   # alarm + this report
+            self.assertEqual(self.mocks["power_g103"].await_count, 1)
+            gps103_handler._power_cut_at[DEVICE_ID] -= 601          # pretend the window has passed
+            writer.write(tracker())
+            await writer.drain()
+            await self.until(lambda: self.mocks["power_g103"].await_count == 2)
+        self.assertEqual(self.mocks["power_g103"].call_args.args, (DEVICE_ID, False))
+
+    async def test_the_timed_reset_can_be_disabled(self):
+        from services import gps103_handler
+        _, writer = await self.login()
+        self.mocks["power_g103"].reset_mock()
+        with patch.object(config, "GPS103_POWER_CUT_RESET_SECONDS", 0):
+            writer.write(tracker("ac alarm"))
+            await writer.drain()
+            await self.until(lambda: self.mocks["power_g103"].await_count == 1)
+            gps103_handler._power_cut_at[DEVICE_ID] -= 100000
+            writer.write(tracker())
+            await writer.drain()
+            await self.until(lambda: self.mocks["track_g103"].await_count == 2)
+        self.assertEqual(self.mocks["power_g103"].await_count, 1)
+
+
 class Gps103SecurityTests(ServerTestCase):
     async def test_unknown_imei_is_rejected_silently_and_disconnected(self):
         reader, writer = await self.connect()
@@ -338,6 +418,39 @@ class Gt06RegressionTests(ServerTestCase):
         await self.until(lambda: self.mocks["track_gt06"].await_count == 1)
         kwargs = self.mocks["track_gt06"].call_args.kwargs
         self.assertAlmostEqual(kwargs["latitude"], 6.9271, places=4)
+
+    async def test_gt06_power_cut_alarm_marks_power_disconnected(self):
+        reader, writer = await self.connect()
+        writer.write(gt06_login(GT06_IMEI))
+        await writer.drain()
+        await self.read(reader)
+        writer.write(gt06_alarm(2))                                # alarm type 2 = POWER_CUT
+        await writer.drain()
+        await self.until(lambda: self.mocks["power_gt06"].await_count == 1)
+        self.assertEqual(self.mocks["power_gt06"].call_args.args, (DEVICE_ID, True))
+        await self.until(lambda: any(
+            c.kwargs.get("event_type") == "POWER_CUT" for c in self.mocks["event_gt06"].await_args_list))
+
+    async def test_gt06_power_bit_in_an_alarm_packet_marks_power_disconnected(self):
+        reader, writer = await self.connect()
+        writer.write(gt06_login(GT06_IMEI))
+        await writer.drain()
+        await self.read(reader)
+        writer.write(gt06_alarm(1, terminal_info=0xC6))            # SOS, terminal bit 7 set
+        await writer.drain()
+        await self.until(lambda: self.mocks["power_gt06"].await_count == 1)
+        self.assertEqual(self.mocks["power_gt06"].call_args.args, (DEVICE_ID, True))
+
+    async def test_gt06_other_alarm_leaves_power_alone(self):
+        reader, writer = await self.connect()
+        writer.write(gt06_login(GT06_IMEI))
+        await writer.drain()
+        await self.read(reader)
+        writer.write(gt06_alarm(1, terminal_info=0x46))            # SOS, power bit clear
+        await writer.drain()
+        await self.until(lambda: any(
+            c.kwargs.get("event_type") == "SOS" for c in self.mocks["event_gt06"].await_args_list))
+        self.mocks["power_gt06"].assert_not_awaited()
 
     async def test_gt06_and_gps103_devices_coexist_on_one_port(self):
         _, g103 = await self.login()

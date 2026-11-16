@@ -58,6 +58,8 @@ IO_BATTERY_VOLTAGE_MV = 67
 IO_BATTERY_LEVEL = 113
 IO_IGNITION = 239
 IO_MOVEMENT = 240
+# "Unplug" digital IO: 1 = external power disconnected (FMB factory meaning).
+IO_UNPLUG = 252
 
 
 class TeltonikaError(Exception):
@@ -113,6 +115,11 @@ class AvlRecord:
     @property
     def ignition(self):
         return self._flag(IO_IGNITION)
+
+    @property
+    def power_cut(self):
+        """True when the unit reports external power unplugged, None if not reported."""
+        return self._flag(IO_UNPLUG)
 
     @property
     def movement(self):
