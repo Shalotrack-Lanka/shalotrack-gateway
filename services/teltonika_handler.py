@@ -43,7 +43,7 @@ from repositories.raw_packet_repository import RawPacketRepository
 from services.device_registry import register_device, get_device, get_imei_by_socket
 from services.event_service import create_event
 from services.raw_packet_policy import should_store_raw
-from services.tracking_service import save_location, mark_device_alive, set_ignition
+from services.tracking_service import save_location, mark_device_alive, set_ignition, set_power_status
 from utils.logger import log, debug
 
 DEFAULT_MODEL = "FMB"
@@ -54,6 +54,7 @@ DEFAULT_MODEL = "FMB"
 _ALIVE_REFRESH_SECONDS = 60
 _last_alive: dict[str, float] = {}
 _last_ignition: dict[str, bool] = {}
+_last_power: dict[str, bool] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +147,7 @@ async def _handle_login(raw, writer, addr):
     # Fresh connection: forget cached state so the first packet refreshes it.
     _last_alive.pop(device_id, None)
     _last_ignition.pop(device_id, None)
+    _last_power.pop(device_id, None)
 
     # The device sends nothing until it sees 01, so answer before bookkeeping.
     await _send(writer, p.LOGIN_ACCEPT)
@@ -253,6 +255,15 @@ async def _refresh_status(device_id: str, records) -> None:
         if rec.ignition is not None:
             ignition = rec.ignition
             break
+
+    power_cut = None
+    for rec in sorted(records, key=lambda r: r.timestamp, reverse=True):
+        if rec.power_cut is not None:
+            power_cut = rec.power_cut
+            break
+    if power_cut is not None and _last_power.get(device_id) != power_cut:
+        await _safely("power status update", set_power_status(device_id, power_cut))
+        _last_power[device_id] = power_cut
 
     if ignition is not None and _last_ignition.get(device_id) != ignition:
         await _safely("ignition update", set_ignition(device_id, ignition))

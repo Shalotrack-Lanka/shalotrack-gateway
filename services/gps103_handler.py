@@ -21,7 +21,10 @@ Differences from the GT06 path, all deliberate:
   from being recorded, and vice versa.
 """
 
+import time
 from datetime import datetime, timezone
+
+import config
 
 from constants.event_types import EventType
 from constants.severity import Severity
@@ -35,11 +38,27 @@ from services.tracking_service import (
     save_location,
     mark_device_alive,
     set_ignition,
+    set_power_status,
 )
 from services.raw_packet_policy import should_store_raw
 from utils.logger import log
 
 DEFAULT_MODEL = "TK103"
+
+# GPS103 says "power cut" once and never says "power back". device_id -> the
+# monotonic time of the alarm; cleared when the state is reset (see
+# _reset_power_if_due and _handle_login).
+_power_cut_at: dict[str, float] = {}
+
+
+async def _reset_power_if_due(device_id) -> None:
+    """Mark power restored once the alarm is older than GPS103_POWER_CUT_RESET_SECONDS."""
+    cut_at = _power_cut_at.get(device_id)
+    window = config.GPS103_POWER_CUT_RESET_SECONDS
+    if cut_at is None or window <= 0 or time.monotonic() - cut_at < window:
+        return
+    _power_cut_at.pop(device_id, None)
+    await _safely("power status reset", set_power_status(device_id, False))
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +177,10 @@ async def _handle_login(text, raw, writer, addr):
 
     await _safely("raw packet save", _save_raw(device_id, raw, always=True))
     await _safely("mark online", mark_device_alive(device_id))
+    # A unit that logs in again has restarted: forget any power cut. Written
+    # unconditionally so a cut left by a previous gateway process is cleared too.
+    _power_cut_at.pop(device_id, None)
+    await _safely("power status reset", set_power_status(device_id, False))
     try:
         vehicle_id = await DeviceRepository.get_vehicle_by_device(device_id)
     except Exception:
@@ -189,6 +212,7 @@ async def _handle_heartbeat(text, writer):
     # No raw-packet row: a GPS103 heartbeat is only the IMEI, so storing it
     # would add a row per beat per device and nothing to replay.
     device = get_device(connection_imei)
+    await _reset_power_if_due(device["device_id"])
     await _safely("heartbeat update", mark_device_alive(device["device_id"], heartbeat=True))
     return connection_imei
 
@@ -234,6 +258,12 @@ async def _handle_tracker(text, raw, writer):
     await _safely("raw packet save", _save_raw(
         device_id, raw, always=bool(alarm) or not data["known_keyword"]
     ))
+
+    if alarm == "POWER_CUT":
+        _power_cut_at[device_id] = time.monotonic()
+        await _safely("power status update", set_power_status(device_id, True))
+    else:
+        await _reset_power_if_due(device_id)
 
     if data["ignition"] is not None:
         await _safely("ignition update", set_ignition(device_id, data["ignition"]))

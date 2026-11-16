@@ -114,6 +114,14 @@ H02_STATUS_FLAGS = os.getenv("H02_STATUS_FLAGS", "false").strip().lower() == "tr
 # broken clock would freeze the live position at a time that never arrives).
 H02_MAX_FUTURE_SECONDS = int(os.getenv("H02_MAX_FUTURE_SECONDS", "600"))
 
+# GPS103 reports a power cut only as a one-off 'ac alarm' message and never says
+# when power returns. The gateway marks the device power-disconnected on the
+# alarm, then back to connected on the next login or, failing that, on the
+# first message after this many seconds. Too short: a still-unplugged unit is
+# reported as restored. Too long: a real restore shows late. 0 disables the
+# timed reset (login still resets).
+GPS103_POWER_CUT_RESET_SECONDS = int(os.getenv("GPS103_POWER_CUT_RESET_SECONDS", "600"))
+
 # ================================================================
 # Database
 # ================================================================

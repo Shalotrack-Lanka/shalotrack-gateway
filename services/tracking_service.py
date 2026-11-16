@@ -2,6 +2,7 @@ from database import managed_connection
 from datetime import datetime, timezone
 from utils.logger import log
 from config import GPS_TRACKING_IDEMPOTENT
+from constants.power_status import POWER_CONNECTED, POWER_DISCONNECTED
 # Every float bound to a numeric column MUST go through clean_decimal — see
 # utils/numeric.py for the 2026-10-10 incident this prevents.
 from utils.numeric import clean_decimal as _clean_decimal
@@ -188,6 +189,32 @@ async def set_ignition(device_id, ignition_status: bool):
                 "UpdatedAt"      = EXCLUDED."UpdatedAt"
             """,
             device_id, now, bool(ignition_status)
+        )
+
+
+async def set_power_status(device_id, disconnected: bool):
+    """
+    Record the external-power state only (0 connected, 1 disconnected, see
+    constants/power_status.py). Used by the families that report a power cut as
+    an alarm or an IO flag instead of in every status packet (GT06 alarm
+    packet, GPS103, H02, Teltonika). The database trigger on DeviceStatuses
+    turns a change of this column into the PowerCut push, so it must be written
+    on the transition only, never on every packet. Same insert-defaults rule as
+    set_ignition().
+    """
+    now = datetime.now(timezone.utc)
+    async with managed_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO "DeviceStatuses"
+            ("DeviceId","IsOnline","LastHeartbeat","LastSeen","GpsSignal","BatteryLevel","IgnitionStatus","MovementStatus","PowerStatus","UpdatedAt")
+            VALUES ($1, TRUE, NULL, $2, 0, 0, FALSE, FALSE, $3, $2)
+            ON CONFLICT ("DeviceId") DO UPDATE SET
+                "PowerStatus" = EXCLUDED."PowerStatus",
+                "LastSeen"    = EXCLUDED."LastSeen",
+                "UpdatedAt"   = EXCLUDED."UpdatedAt"
+            """,
+            device_id, now, POWER_DISCONNECTED if disconnected else POWER_CONNECTED
         )
 
 
