@@ -166,8 +166,8 @@ async def process_h02_frame(raw: bytes, writer, addr):
 async def _authenticate(msg: p.H02Message, raw, writer, addr):
     log(f"📡 H02 first message — ID: {msg.device_id} ({msg.form} {msg.msg_type})")
 
-    device_id = await DeviceRepository.get_device_by_imei(
-        msg.device_id, protocol_type=H02, default_model=DEFAULT_MODEL
+    device_id = await DeviceRepository.get_device_by_h02_id(
+        msg.device_id, default_model=DEFAULT_MODEL
     )
     if not device_id:
         hint = ""

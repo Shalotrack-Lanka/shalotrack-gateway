@@ -71,10 +71,13 @@ class H02ServerTests(ServerTestCase):
         h02_handler._last_alarm.clear()
         h02_handler._last_power.clear()
 
-        async def lookup(imei, **kwargs):
-            return DEVICE_ID if imei in (IMEI, SHORT_ID, "359586015829802") else None
+        async def lookup_h02(tracker_id, **kwargs):
+            return DEVICE_ID if tracker_id in (IMEI, SHORT_ID, "359586015829802") else None
 
-        self.mocks["lookup"].side_effect = lookup
+        from repositories.device_repository import DeviceRepository
+        h02_lookup = patch.object(DeviceRepository, "get_device_by_h02_id", side_effect=lookup_h02)
+        self.mocks["lookup_h02"] = h02_lookup.start()
+        self.addCleanup(h02_lookup.stop)
 
         for name, target, extra in (
             ("save", "services.h02_handler.save_location", {"new_callable": AsyncMock, "return_value": True}),
@@ -128,8 +131,7 @@ class H02ServerTests(ServerTestCase):
         entry = device_registry.get_device(IMEI)
         self.assertEqual(entry["protocol"], "H02")
         self.assertEqual(entry["device_id"], DEVICE_ID)
-        kwargs = self.mocks["lookup"].call_args.kwargs
-        self.assertEqual((kwargs["protocol_type"], kwargs["default_model"]), ("H02", "H02"))
+        self.mocks["lookup_h02"].assert_awaited_once_with(IMEI, default_model="H02")
 
         await self.until(lambda: self.mocks["event"].await_count == 1)
         self.assertEqual(self.mocks["event"].call_args.kwargs["event_type"], "DEVICE_ONLINE")
@@ -168,7 +170,7 @@ class H02ServerTests(ServerTestCase):
         async def reject(imei, **kwargs):
             return None
 
-        self.mocks["lookup"].side_effect = reject
+        self.mocks["lookup_h02"].side_effect = reject
         reader, writer = await self.connect()
         await self.send(writer, BIN_BOGOTA)
         self.assertEqual(await self.read(reader), b"")
@@ -176,11 +178,16 @@ class H02ServerTests(ServerTestCase):
         self.assertIn("first frame (binary, BIN)", line)
         self.assertIn(BIN_BOGOTA[:20].hex(), line)
 
-    async def test_a_known_non_imei_id_is_accepted(self):
-        # Whether the ERP can hold such an id is a database matter (docs/h02.md);
-        # when it can, the gateway serves it.
+    async def test_a_known_mapped_non_imei_id_is_accepted(self):
+        # Registry stays keyed by the wire ID; persistence uses the canonical DeviceId.
         await self.login_ok(SHORT_ID)
         self.assertEqual(device_registry.get_device(SHORT_ID)["protocol"], "H02")
+        self.assertEqual(device_registry.get_device(SHORT_ID)["device_id"], DEVICE_ID)
+
+    async def test_a_different_wire_id_after_login_is_treated_as_spoofing(self):
+        reader, writer = await self.login_ok(SHORT_ID)
+        await self.send(writer, htbt(UNKNOWN_SHORT_ID))
+        self.assertEqual(await self.read(reader), b"")
 
     async def test_family_that_is_not_enabled_is_treated_as_unknown(self):
         with patch.object(config, "ENABLED_PROTOCOLS", frozenset({"GT06", "GPS103"})):
@@ -188,13 +195,13 @@ class H02ServerTests(ServerTestCase):
             await self.send(writer, v1())
             self.assertEqual(await self.read(reader), b"")
         self.assertIsNone(device_registry.get_device(IMEI))
-        self.mocks["lookup"].assert_not_called()
+        self.mocks["lookup_h02"].assert_not_awaited()
 
     async def test_unparseable_first_message_closes_the_connection(self):
         reader, writer = await self.connect()
         await self.send(writer, b"*HQ,abc,V1,x#")
         self.assertEqual(await self.read(reader), b"")
-        self.mocks["lookup"].assert_not_called()
+        self.mocks["lookup_h02"].assert_not_awaited()
 
     async def test_login_survives_fragmented_delivery(self):
         reader, writer = await self.connect()
@@ -428,7 +435,7 @@ class H02ServerTests(ServerTestCase):
         reader, writer = await self.connect()
         await self.send(writer, b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
         self.assertEqual(await self.read(reader), b"")
-        self.mocks["lookup"].assert_not_called()
+        self.mocks["lookup_h02"].assert_not_awaited()
 
 
 if __name__ == "__main__":
