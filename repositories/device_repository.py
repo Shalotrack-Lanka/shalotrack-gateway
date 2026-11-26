@@ -130,42 +130,51 @@ class DeviceRepository:
             return None
 
     @staticmethod
-    async def get_device_by_h02_id(tracker_id: str, default_model: str = "H02") -> str | None:
-        """Resolve a short H02 wire ID through an explicit mapping, then apply the
-        existing canonical-IMEI activation check. No ID guessing is permitted."""
+    async def resolve_h02_device(tracker_id: str, default_model: str = "H02"):
+        """Resolve an H02 wire ID to (canonical_imei, device_id), or None.
+
+        A short wire ID goes through the explicit H02DeviceIdentifiers mapping;
+        nothing is guessed. A mapping never activates a device: the canonical IMEI
+        still goes through the normal allowlist check. The canonical IMEI is what
+        the rest of the platform (ERP, API, enforcer) knows the device by."""
         if not tracker_id:
             return None
         if len(tracker_id) == 15:
-            return await DeviceRepository.get_device_by_imei(
-                tracker_id, protocol_type="H02", default_model=default_model
-            )
+            canonical_imei = tracker_id
+        else:
+            conn = await get_db_connection()
+            try:
+                mapping = await conn.fetchrow(
+                    '''
+                    SELECT "ImeiNumber" FROM "H02DeviceIdentifiers"
+                    WHERE "TrackerId" = $1 AND "IsActive" = TRUE
+                    LIMIT 1
+                    ''',
+                    tracker_id,
+                )
+            except Exception as e:
+                log(f"❌ H02 identifier mapping lookup error for {tracker_id}: {e}")
+                return None
+            finally:
+                await release_db_connection(conn)
 
-        conn = await get_db_connection()
-        try:
-            mapping = await conn.fetchrow(
-                '''
-                SELECT "ImeiNumber" FROM "H02DeviceIdentifiers"
-                WHERE "TrackerId" = $1 AND "IsActive" = TRUE
-                LIMIT 1
-                ''',
-                tracker_id,
-            )
-        except Exception as e:
-            log(f"❌ H02 identifier mapping lookup error for {tracker_id}: {e}")
-            return None
-        finally:
-            await release_db_connection(conn)
+            if not mapping:
+                log(f"🚫 H02 tracker ID {tracker_id} has no active canonical IMEI mapping")
+                return None
 
-        if not mapping:
-            log(f"🚫 H02 tracker ID {tracker_id} has no active canonical IMEI mapping")
-            return None
+            canonical_imei = mapping["ImeiNumber"]
+            log(f"🔎 H02 tracker ID {tracker_id} resolved to canonical IMEI {canonical_imei}")
 
-        canonical_imei = mapping["ImeiNumber"]
-        log(f"🔎 H02 tracker ID {tracker_id} resolved to canonical IMEI {canonical_imei}")
-        # A mapping never activates a device; the existing allowlist remains authoritative.
-        return await DeviceRepository.get_device_by_imei(
+        device_id = await DeviceRepository.get_device_by_imei(
             canonical_imei, protocol_type="H02", default_model=default_model
         )
+        return (canonical_imei, device_id) if device_id else None
+
+    @staticmethod
+    async def get_device_by_h02_id(tracker_id: str, default_model: str = "H02") -> str | None:
+        """Device id for an H02 wire ID (see resolve_h02_device)."""
+        resolved = await DeviceRepository.resolve_h02_device(tracker_id, default_model)
+        return resolved[1] if resolved else None
 
     @staticmethod
     async def _admit(conn, imei: str, row) -> bool:

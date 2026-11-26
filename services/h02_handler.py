@@ -145,8 +145,10 @@ async def process_h02_frame(raw: bytes, writer, addr):
         if imei is None:
             return await _authenticate(msg, raw, writer, addr)
 
-        if msg.device_id != imei:
-            log(f"🚨 ID MISMATCH — socket authenticated as {imei} but message claims "
+        entry = get_device(imei) or {}
+        expected = entry.get("wire_id", imei)   # what the unit itself sends
+        if msg.device_id != expected:
+            log(f"🚨 ID MISMATCH — socket authenticated as {expected} but message claims "
                 f"{msg.device_id}. Dropping connection.")
             _close(writer)
             return None
@@ -166,10 +168,10 @@ async def process_h02_frame(raw: bytes, writer, addr):
 async def _authenticate(msg: p.H02Message, raw, writer, addr):
     log(f"📡 H02 first message — ID: {msg.device_id} ({msg.form} {msg.msg_type})")
 
-    device_id = await DeviceRepository.get_device_by_h02_id(
+    resolved = await DeviceRepository.resolve_h02_device(
         msg.device_id, default_model=DEFAULT_MODEL
     )
-    if not device_id:
+    if not resolved:
         hint = ""
         if len(msg.device_id) != 15:
             hint = (f" (this unit reports a {len(msg.device_id)}-digit id, not a 15-digit IMEI; "
@@ -182,8 +184,11 @@ async def _authenticate(msg: p.H02Message, raw, writer, addr):
         _close(writer)
         return None
 
-    log(f"✅ Authorised Device — ID: {msg.device_id} → {device_id}")
-    register_device(msg.device_id, addr[0], device_id, writer, protocol=H02)
+    imei, device_id = resolved
+    log(f"✅ Authorised Device — ID: {msg.device_id} → IMEI {imei} → {device_id}")
+    # Keyed by the canonical IMEI so the ERP, the API's drop command and the
+    # access re-check all find the device; the wire id stays the per-socket check.
+    register_device(imei, addr[0], device_id, writer, protocol=H02, wire_id=msg.device_id)
 
     # Fresh connection: forget cached state so the first message refreshes it.
     _last_alive.pop(device_id, None)
@@ -192,8 +197,8 @@ async def _authenticate(msg: p.H02Message, raw, writer, addr):
     _last_power.pop(device_id, None)
 
     # Answer first (the unit waits for its acknowledgement), bookkeeping after.
-    await _handle_message(msg, raw, writer, msg.device_id, first=True)
-    return msg.device_id
+    await _handle_message(msg, raw, writer, imei, first=True)
+    return imei
 
 
 async def _announce_online(device_id) -> None:

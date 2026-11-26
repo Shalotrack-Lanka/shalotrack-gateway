@@ -22,3 +22,12 @@ ON CONFLICT DO NOTHING;
 -- Verify before reconnecting:
 -- SELECT "TrackerId", "ImeiNumber", "IsActive"
 -- FROM "H02DeviceIdentifiers" WHERE "TrackerId" = '4208298730';
+
+-- The gateway connects as the restricted role 'gateway_app' (Supabase hardening,
+-- 30 Oct). A new table is locked by the event trigger, so the gateway needs an
+-- explicit read grant or every mapped unit (e.g. the LK208) is rejected with
+-- "no active canonical IMEI mapping". SELECT only: the gateway never writes it.
+GRANT SELECT ON "H02DeviceIdentifiers" TO gateway_app;
+-- If the table still reads empty for gateway_app after this, the RLS policy that
+-- the event trigger created for app roles must include it; compare with the policy
+-- on another gateway table (e.g. "GpsDevices") in db2_gateway_api_harden.sql.
