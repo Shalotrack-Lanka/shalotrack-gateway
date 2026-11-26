@@ -11,7 +11,10 @@ _lock = threading.RLock()
 _last_packet_at: datetime | None = None
 
 
-def register_device(imei: str, ip: str, device_id: str, conn, protocol: str = "GT06") -> None:
+def register_device(imei: str, ip: str, device_id: str, conn, protocol: str = "GT06",
+                    wire_id: str | None = None) -> None:
+    """wire_id: the identifier the unit itself sends, when it differs from the
+    canonical IMEI the entry is keyed by (H02 units with a short tracker id)."""
     with _lock:
         existing = _by_imei.get(imei)
         if existing:
@@ -25,6 +28,8 @@ def register_device(imei: str, ip: str, device_id: str, conn, protocol: str = "G
             "connected_at": datetime.now(timezone.utc),
             "last_seen": datetime.now(timezone.utc),
         }
+        if wire_id is not None:
+            entry["wire_id"] = wire_id
         _by_imei[imei] = entry
         _by_socket[id(conn)] = imei
 

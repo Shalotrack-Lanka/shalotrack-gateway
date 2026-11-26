@@ -29,6 +29,7 @@ from test_multiprotocol_server import ServerTestCase, DEVICE_ID, VEHICLE_ID  # n
 
 IMEI = "353588020068342"            # 15-digit IMEI, as the ERP expects
 SHORT_ID = "4106000826"             # 10-digit id some units report
+SHORT_CANONICAL = "866126037773336"  # the IMEI the mapping table points it at
 UNKNOWN_IMEI = "999999999999999"
 UNKNOWN_SHORT_ID = "9999999999"
 
@@ -72,10 +73,14 @@ class H02ServerTests(ServerTestCase):
         h02_handler._last_power.clear()
 
         async def lookup_h02(tracker_id, **kwargs):
-            return DEVICE_ID if tracker_id in (IMEI, SHORT_ID, "359586015829802") else None
+            if tracker_id == SHORT_ID:
+                return (SHORT_CANONICAL, DEVICE_ID)     # mapped wire id -> canonical IMEI
+            if tracker_id in (IMEI, "359586015829802"):
+                return (tracker_id, DEVICE_ID)
+            return None
 
         from repositories.device_repository import DeviceRepository
-        h02_lookup = patch.object(DeviceRepository, "get_device_by_h02_id", side_effect=lookup_h02)
+        h02_lookup = patch.object(DeviceRepository, "resolve_h02_device", side_effect=lookup_h02)
         self.mocks["lookup_h02"] = h02_lookup.start()
         self.addCleanup(h02_lookup.stop)
 
@@ -179,10 +184,23 @@ class H02ServerTests(ServerTestCase):
         self.assertIn(BIN_BOGOTA[:20].hex(), line)
 
     async def test_a_known_mapped_non_imei_id_is_accepted(self):
-        # Registry stays keyed by the wire ID; persistence uses the canonical DeviceId.
+        # The registry is keyed by the canonical IMEI (what the ERP/API know), not the wire id.
         await self.login_ok(SHORT_ID)
-        self.assertEqual(device_registry.get_device(SHORT_ID)["protocol"], "H02")
-        self.assertEqual(device_registry.get_device(SHORT_ID)["device_id"], DEVICE_ID)
+        self.assertEqual(device_registry.get_device(SHORT_CANONICAL)["protocol"], "H02")
+        self.assertEqual(device_registry.get_device(SHORT_CANONICAL)["device_id"], DEVICE_ID)
+        self.assertIsNone(device_registry.get_device(SHORT_ID))
+        self.assertEqual(device_registry.get_device(SHORT_CANONICAL)["wire_id"], SHORT_ID)
+
+    async def test_mapped_unit_is_visible_to_the_erp_by_its_canonical_imei(self):
+        await self.login_ok(SHORT_ID)
+        self.assertIn(SHORT_CANONICAL, device_registry.get_all_devices())
+        self.assertNotIn(SHORT_ID, device_registry.get_all_devices())
+
+    async def test_mapped_unit_cannot_switch_to_its_canonical_imei_on_the_same_socket(self):
+        reader, writer = await self.login_ok(SHORT_ID)
+        await self.send(writer, v1(SHORT_CANONICAL))       # not what this unit sends
+        self.assertEqual(await self.read(reader), b"")
+        self.assertIn("MISMATCH", self.logged())
 
     async def test_a_different_wire_id_after_login_is_treated_as_spoofing(self):
         reader, writer = await self.login_ok(SHORT_ID)
@@ -346,7 +364,7 @@ class H02ServerTests(ServerTestCase):
         self.assertAlmostEqual(saved["latitude"], 4.69898, places=5)
         self.assertAlmostEqual(saved["longitude"], -74.06972, places=5)
         self.assertEqual(saved["event_time"], datetime(2015, 8, 31, 21, 53, 21, tzinfo=timezone.utc))
-        self.assertEqual(device_registry.get_device(SHORT_ID)["protocol"], "H02")
+        self.assertEqual(device_registry.get_device(SHORT_CANONICAL)["protocol"], "H02")
         await self.assert_silent(reader)                                       # binary frames are not acknowledged
 
     # -- status word (off by default) --------------------------------------------
